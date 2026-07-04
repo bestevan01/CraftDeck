@@ -1,0 +1,33 @@
+name: craftdeck
+arch: "${ARCH}" # set at build time: arm64 or armhf (see requirements.md NFR-2)
+platform: linux
+version: "${VERSION}"
+maintainer: "CraftDeck maintainers"
+description: >
+  Web-managed Minecraft Java Edition server manager for Raspberry Pi.
+homepage: https://github.com/example/craftdeck
+license: MIT
+
+depends:
+  - ca-certificates
+  # Java (Adoptium Temurin 8/17/21) is intentionally NOT an apt Depends --
+  # postinst registers the Adoptium repo and installs it there, since
+  # Debian Bookworm's own repo only ships openjdk-17 (requirements.md
+  # FR-42a). See scripts/postinst.
+
+contents:
+  - src: ../build/craftdeckd
+    dst: /usr/bin/craftdeckd
+    file_info:
+      mode: 0755
+  - src: systemd/craftdeck.service
+    dst: /lib/systemd/system/craftdeck.service
+  - src: adoptium.gpg
+    dst: /usr/share/keyrings/adoptium.gpg
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: scripts/postinst
+  preremove: scripts/prerm
+  postremove: scripts/postrm

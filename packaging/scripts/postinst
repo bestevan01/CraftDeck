@@ -1,0 +1,38 @@
+#!/bin/sh
+# postinst: runs after `dpkg -i craftdeck_*.deb` (i.e. `apt install craftdeck`).
+# See requirements.md FR-41~45, FR-42a~d, FR-43, FR-43a.
+set -e
+
+# 1. Dedicated system account for the craftdeckd binary path/config, even
+#    though the service itself runs as root (see craftdeck.service comment
+#    and requirements.md FR-43a) -- used for file ownership under
+#    /etc/craftdeck, not for running the daemon.
+if ! getent passwd craftdeck >/dev/null; then
+	adduser --system --group --home /var/lib/craftdeck --no-create-home craftdeck
+fi
+
+mkdir -p /var/lib/craftdeck /etc/craftdeck
+chown craftdeck:craftdeck /var/lib/craftdeck /etc/craftdeck
+
+# 2. Register the Adoptium APT repository using the GPG key bundled in
+#    this package (FR-42c: no network fetch of the key at install time).
+if [ ! -f /etc/apt/sources.list.d/adoptium.list ]; then
+	echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release) main" \
+		> /etc/apt/sources.list.d/adoptium.list
+fi
+
+# 3. Install Java 8/17/21 from Adoptium (FR-42, FR-42a). Fail loudly rather
+#    than continuing with a half-installed service (FR-42d).
+apt-get update
+if ! apt-get install -y temurin-8-jre temurin-17-jre temurin-21-jre; then
+	echo "craftdeck: failed to install Java runtimes from the Adoptium repository." >&2
+	echo "craftdeck: check network connectivity / packages.adoptium.net reachability and re-run 'apt install -f'." >&2
+	exit 1
+fi
+
+# 4. Enable and start the service so the daemon is running immediately
+#    after install, with no extra steps required from the user (FR-43).
+systemctl daemon-reload
+systemctl enable --now craftdeck.service
+
+exit 0

@@ -1,0 +1,22 @@
+#!/bin/sh
+# postrm: on `apt remove`, disable the unit but leave /var/lib/craftdeck
+# (world data, backups) untouched. Only on `apt purge` do we also remove
+# config -- never world data/backups without an explicit prompt
+# (requirements.md FR-44).
+set -e
+
+if [ -d /run/systemd/system ]; then
+	systemctl disable craftdeck.service >/dev/null 2>&1 || true
+	systemctl daemon-reload
+fi
+
+case "$1" in
+	purge)
+		rm -rf /etc/craftdeck
+		rm -f /etc/apt/sources.list.d/adoptium.list
+		echo "craftdeck: world data and backups under /var/lib/craftdeck were left in place." >&2
+		echo "craftdeck: remove that directory manually if you no longer need it." >&2
+		;;
+esac
+
+exit 0

@@ -1,0 +1,22 @@
+[Unit]
+Description=CraftDeck Minecraft server manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+; Runs as root: craftdeckd calls systemd-run to create per-instance
+; transient units with DynamicUser=yes and cgroup limits (see
+; requirements.md FR-43a, ARCHITECTURE.md section 5.1). Those spawned
+; Minecraft/proxy processes get their own unprivileged dynamic accounts --
+; this User setting is intentionally NOT dropped to a service account.
+User=root
+ExecStart=/usr/bin/craftdeckd
+Restart=on-failure
+RestartSec=5
+Environment=CRAFTDECK_DATA_DIR=/var/lib/craftdeck
+Environment=CRAFTDECK_MASTER_KEY=/etc/craftdeck/master.key
+Environment=CRAFTDECK_LISTEN_ADDR=:8080
+
+[Install]
+WantedBy=multi-user.target

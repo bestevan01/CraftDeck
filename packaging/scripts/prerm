@@ -1,0 +1,9 @@
+#!/bin/sh
+# prerm: stop the service before files are removed (requirements.md FR-44).
+set -e
+
+if [ -d /run/systemd/system ]; then
+	systemctl stop craftdeck.service || true
+fi
+
+exit 0
