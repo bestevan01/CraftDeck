@@ -1,10 +1,18 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"craftdeck/internal/instance"
+	"craftdeck/internal/javaruntime"
+	"craftdeck/internal/loader"
+	"craftdeck/internal/process"
 
 	"github.com/google/uuid"
 )
@@ -27,6 +35,11 @@ type createInstanceRequest struct {
 	GamePort        int    `json:"game_port"`
 	CPUQuotaPercent int    `json:"cpu_quota_percent"`
 	MemoryMaxMB     int    `json:"memory_max_mb"`
+	// AcceptEula must be true for kind=server: Mojang's EULA requires
+	// explicit operator consent before a server.jar may run
+	// (https://www.minecraft.net/eula). Proxy instances (Velocity/
+	// BungeeCord) don't run a world and don't need this.
+	AcceptEula bool `json:"accept_eula"`
 }
 
 func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
@@ -35,23 +48,49 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	kind := instance.Kind(req.Kind)
+
+	if kind == instance.KindServer && !req.AcceptEula {
+		http.Error(w, "accept_eula must be true to create a Minecraft server instance (see https://www.minecraft.net/eula)", http.StatusBadRequest)
+		return
+	}
+
+	var javaMajor int
+	if kind == instance.KindServer {
+		major, err := javaruntime.MajorForMCVersion(req.MCVersion)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid mc_version: %v", err), http.StatusBadRequest)
+			return
+		}
+		javaMajor = major
+	}
 
 	id := uuid.NewString()
+	workDir := filepath.Join(s.dataDir, "instances", id)
+
 	inst := &instance.Instance{
 		ID:              id,
 		Name:            req.Name,
-		Kind:            instance.Kind(req.Kind),
+		Kind:            kind,
 		Loader:          req.Loader,
 		LoaderVersion:   req.LoaderVersion,
 		MCVersion:       req.MCVersion,
+		JavaMajor:       javaMajor,
 		GamePort:        req.GamePort,
 		CPUQuotaPercent: req.CPUQuotaPercent,
 		MemoryMaxMB:     req.MemoryMaxMB,
-		WorkDir:         "/var/lib/craftdeck/instances/" + id,
+		WorkDir:         workDir,
 		Status:          instance.StatusStopped,
 		// TODO: generate RCONPort/RCONPassword, encrypt RCONPassword at rest
 		// (see requirements.md FR-31, ARCHITECTURE.md section 3 design notes)
-		// before this handler is wired up for real use.
+		// before RCON support lands.
+	}
+
+	if kind == instance.KindServer {
+		if err := provisionServerFiles(r.Context(), inst); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if err := s.instances.Create(r.Context(), inst); err != nil {
@@ -59,6 +98,36 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, inst)
+}
+
+// provisionServerFiles creates the instance's work directory, accepts the
+// EULA on the operator's behalf (already confirmed via AcceptEula above),
+// writes a minimal server.properties, and downloads the loader jar if an
+// adapter for it exists yet (FR-1, FR-2). Loaders without an adapter so far
+// (everything except Vanilla) are left without a jar -- the operator can
+// upload one manually per FR-3 once that's wired up.
+func provisionServerFiles(ctx context.Context, inst *instance.Instance) error {
+	if err := os.MkdirAll(inst.WorkDir, 0o750); err != nil {
+		return fmt.Errorf("create work dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(inst.WorkDir, "eula.txt"), []byte("eula=true\n"), 0o640); err != nil {
+		return fmt.Errorf("write eula.txt: %w", err)
+	}
+	if inst.GamePort > 0 {
+		props := fmt.Sprintf("server-port=%d\n", inst.GamePort)
+		if err := os.WriteFile(filepath.Join(inst.WorkDir, "server.properties"), []byte(props), 0o640); err != nil {
+			return fmt.Errorf("write server.properties: %w", err)
+		}
+	}
+
+	adapter, ok := loader.Get(inst.Loader)
+	if !ok {
+		return nil // no adapter yet for this loader; upload jar manually (FR-3)
+	}
+	if _, err := adapter.Download(ctx, inst.MCVersion, inst.WorkDir); err != nil {
+		return fmt.Errorf("download %s server jar: %w", inst.Loader, err)
+	}
+	return nil
 }
 
 func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
@@ -84,16 +153,63 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
-	// TODO: resolve StartSpec (java binary per instance.JavaMajor, loader
-	// launch args) and call process.Supervisor.Start; see
-	// ARCHITECTURE.md section 5.1 and 5.2.
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	ctx := r.Context()
+	id := r.PathValue("id")
+
+	inst, err := s.instances.Get(ctx, id)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
+	jarPath := filepath.Join(inst.WorkDir, "server.jar")
+	if _, err := os.Stat(jarPath); errors.Is(err, os.ErrNotExist) {
+		http.Error(w, fmt.Sprintf("no server.jar for instance %s: no loader adapter downloaded one and none was uploaded (see FR-3)", id), http.StatusConflict)
+		return
+	}
+
+	javaArgs := []string{}
+	if inst.MemoryMaxMB > 0 {
+		javaArgs = append(javaArgs, fmt.Sprintf("-Xmx%dM", inst.MemoryMaxMB))
+	}
+	javaArgs = append(javaArgs, "-jar", "server.jar", "nogui")
+
+	spec := process.StartSpec{
+		InstanceID:      inst.ID,
+		WorkDir:         inst.WorkDir,
+		JavaBinary:      javaruntime.BinaryPath(inst.JavaMajor),
+		JavaArgs:        javaArgs,
+		CPUQuotaPercent: inst.CPUQuotaPercent,
+		MemoryMaxMB:     inst.MemoryMaxMB,
+	}
+
+	if err := s.supervisor.Start(ctx, spec); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.instances.UpdateStatus(ctx, id, instance.StatusStarting); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
-	// TODO: prefer RCON "stop" for a graceful shutdown before falling back
-	// to process.Supervisor.Stop.
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	// TODO: once the RCON client exists, send "stop" over RCON first for a
+	// graceful shutdown (world save included) and only fall back to
+	// supervisor.Stop if the instance doesn't exit in time.
+	ctx := r.Context()
+	id := r.PathValue("id")
+
+	if err := s.supervisor.Stop(ctx, id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.instances.UpdateStatus(ctx, id, instance.StatusStopped); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) handleRestartInstance(w http.ResponseWriter, r *http.Request) {

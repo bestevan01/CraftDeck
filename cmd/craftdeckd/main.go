@@ -19,6 +19,7 @@ import (
 	"craftdeck/internal/config"
 	"craftdeck/internal/db"
 	"craftdeck/internal/instance"
+	"craftdeck/internal/process"
 	"craftdeck/web"
 )
 
@@ -42,7 +43,8 @@ func run() error {
 	defer database.Close()
 
 	instances := instance.NewRepository(database)
-	apiServer := api.NewServer(instances)
+	supervisor := process.NewSupervisor()
+	apiServer := api.NewServer(instances, supervisor, cfg.DataDir)
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiServer.Routes())
