@@ -1,8 +1,9 @@
 // Package process starts and supervises Minecraft server/proxy instances as
-// transient systemd units. Per ARCHITECTURE.md section 5.1, each instance
-// runs under its own systemd DynamicUser rather than a shared account, so a
-// compromised plugin/mod in one instance cannot read another instance's
-// world data.
+// transient systemd units. Per ARCHITECTURE.md section 5.1 (as revised
+// after real-hardware testing -- see instanceuser.go), each instance runs
+// under its own fixed, login-disabled system user rather than a shared
+// account, so a compromised plugin/mod in one instance cannot read another
+// instance's world data.
 package process
 
 import (
@@ -14,9 +15,12 @@ import (
 // StartSpec carries everything Supervisor.Start needs to build the
 // systemd-run invocation for one instance.
 type StartSpec struct {
-	InstanceID      string
-	WorkDir         string
-	JavaBinary      string // e.g. /usr/lib/jvm/temurin-17-jre/bin/java
+	InstanceID string
+	WorkDir    string
+	// Username is the per-instance system user (see EnsureInstanceUser)
+	// that owns WorkDir; the process runs as this user, not root.
+	Username        string
+	JavaBinary      string // e.g. /usr/lib/jvm/temurin-17-jre-arm64/bin/java
 	JavaArgs        []string
 	CPUQuotaPercent int // 0 means "unset, no limit"
 	MemoryMaxMB     int // 0 means "unset, no limit"
@@ -39,8 +43,8 @@ func NewSupervisor() *Supervisor {
 func (s *Supervisor) Start(ctx context.Context, spec StartSpec) error {
 	args := []string{
 		"--unit=" + unitName(spec.InstanceID),
-		"--property=DynamicUser=yes",
-		"--property=StateDirectory=craftdeck/instances/" + spec.InstanceID,
+		"--property=User=" + spec.Username,
+		"--property=Group=" + spec.Username,
 		"--property=WorkingDirectory=" + spec.WorkDir,
 		"--property=MemorySwapMax=0",
 		"--property=Restart=no",

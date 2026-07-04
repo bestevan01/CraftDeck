@@ -6,6 +6,7 @@ package javaruntime
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -31,13 +32,26 @@ func MajorForMCVersion(mcVersion string) (int, error) {
 
 // BinaryPath returns the java executable for the given major version.
 //
-// ASSUMPTION: this path pattern matches Adoptium's Debian packages
-// (temurin-<major>-jre) as of when this was written. Verify against the
-// actual installed package layout (e.g. `dpkg -L temurin-17-jre`) before
-// relying on this in production -- it has not been checked against a real
-// install.
+// VERIFIED against a real install: `apt-get install temurin-21-jre` on
+// Raspberry Pi OS (Debian 13/trixie, arm64) places binaries under
+// /usr/lib/jvm/temurin-<major>-jre-<debian-arch>/bin/java -- note the
+// architecture suffix, which an earlier unverified version of this function
+// omitted.
 func BinaryPath(major int) string {
-	return fmt.Sprintf("/usr/lib/jvm/temurin-%d-jre/bin/java", major)
+	return fmt.Sprintf("/usr/lib/jvm/temurin-%d-jre-%s/bin/java", major, debianArch())
+}
+
+// debianArch maps Go's GOARCH to the Debian architecture suffix Adoptium's
+// packages use.
+func debianArch() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "arm64"
+	case "arm":
+		return "armhf" // Raspberry Pi OS's 32-bit builds are hard-float
+	default:
+		return runtime.GOARCH
+	}
 }
 
 func parseVersion(v string) ([]int, error) {
