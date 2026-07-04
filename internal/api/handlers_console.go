@@ -1,12 +1,87 @@
 package api
 
-import "net/http"
+import (
+	"bufio"
+	"context"
+	"net/http"
+	"os/exec"
 
-// TODO(console): implement the WebSocket protocol described in
-// ARCHITECTURE.md section 4.2 (log/state/cmd_result frames from the server,
-// command frames from the client). Needs a WebSocket library decision
-// (e.g. nhooyr.io/websocket) before this can be implemented; not yet added
-// to go.mod pending that choice.
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
+)
+
+// consoleFrame matches the WebSocket protocol in ARCHITECTURE.md section 4.2.
+type consoleFrame struct {
+	Type    string `json:"type"`
+	Line    string `json:"line,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Command string `json:"command,omitempty"`
+	Text    string `json:"text,omitempty"`
+	OK      bool   `json:"ok,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// handleConsoleWebSocket streams an instance's systemd journal output live
+// and accepts free-text commands (FR-14, FR-15), executing them over the
+// same RCON path GUI buttons use (FR-18).
 func (s *Server) handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	id := r.PathValue("id")
+	if _, err := s.instances.Get(r.Context(), id); err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	unit := "craftdeck-instance-" + id
+	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "-f", "-n", "50", "-o", "cat")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	defer cmd.Wait() //nolint:errcheck // killed via ctx cancellation on return
+
+	// Stream journal lines to the client.
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			frame := consoleFrame{Type: "log", Line: scanner.Text()}
+			if err := wsjson.Write(ctx, conn, frame); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Read commands from the client until it disconnects.
+	for {
+		var in consoleFrame
+		if err := wsjson.Read(ctx, conn, &in); err != nil {
+			return
+		}
+		if in.Type != "command" {
+			continue
+		}
+		// Same execution path as the REST command endpoint (FR-18): both
+		// go through the manager's persistent per-instance connection.
+		result, execErr := s.rconMgr.Execute(id, in.Text)
+		out := consoleFrame{Type: "cmd_result", Command: in.Text, OK: execErr == nil}
+		if execErr != nil {
+			out.Error = execErr.Error()
+		} else {
+			out.Line = result
+		}
+		if err := wsjson.Write(ctx, conn, out); err != nil {
+			return
+		}
+	}
 }

@@ -20,6 +20,7 @@ import (
 	"craftdeck/internal/db"
 	"craftdeck/internal/instance"
 	"craftdeck/internal/process"
+	"craftdeck/internal/rcon"
 	"craftdeck/web"
 )
 
@@ -32,7 +33,11 @@ func main() {
 func run() error {
 	cfg := config.Load()
 
-	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
+	// 0711: traversable by per-instance users (so they can CHDIR into their
+	// own subdirectory) without letting them list its contents; see
+	// handlers_instance.go's provisionServerFiles for the matching
+	// "instances" subdirectory permission.
+	if err := os.MkdirAll(cfg.DataDir, 0o711); err != nil {
 		return err
 	}
 
@@ -44,7 +49,8 @@ func run() error {
 
 	instances := instance.NewRepository(database)
 	supervisor := process.NewSupervisor()
-	apiServer := api.NewServer(instances, supervisor, cfg.DataDir)
+	rconMgr := rcon.NewManager()
+	apiServer := api.NewServer(instances, supervisor, rconMgr, cfg.DataDir)
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiServer.Routes())

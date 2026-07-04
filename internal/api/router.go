@@ -10,18 +10,20 @@ import (
 
 	"craftdeck/internal/instance"
 	"craftdeck/internal/process"
+	"craftdeck/internal/rcon"
 )
 
 type Server struct {
 	instances  *instance.Repository
 	supervisor *process.Supervisor
+	rconMgr    *rcon.Manager
 	// dataDir roots per-instance work directories (dataDir/instances/<id>);
 	// see internal/config for how it's configured (CRAFTDECK_DATA_DIR).
 	dataDir string
 }
 
-func NewServer(instances *instance.Repository, supervisor *process.Supervisor, dataDir string) *Server {
-	return &Server{instances: instances, supervisor: supervisor, dataDir: dataDir}
+func NewServer(instances *instance.Repository, supervisor *process.Supervisor, rconMgr *rcon.Manager, dataDir string) *Server {
+	return &Server{instances: instances, supervisor: supervisor, rconMgr: rconMgr, dataDir: dataDir}
 }
 
 func (s *Server) Routes() http.Handler {

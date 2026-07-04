@@ -7,6 +7,7 @@ require (
 	github.com/pquerna/otp v1.4.0
 	golang.org/x/crypto v0.24.0
 	modernc.org/sqlite v1.30.1
+	nhooyr.io/websocket v1.8.17
 )
 
 require (
