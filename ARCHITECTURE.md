@@ -51,12 +51,12 @@
 │ │ SQLite (single file, WAL mode)                                   │ │
 │ └──────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
-               │  systemd-run (DynamicUser per instance, cgroup isolation)
+               │  systemd-run (fixed per-instance user, cgroup isolation)
                ▼
      ┌────────────────────┐  ┌────────────────────┐  ┌────────────────┐
      │ MC Server #1 (JVM) │  │ MC Server #2 (JVM) │  │ Velocity Proxy │
-     │ Temurin 17         │  │ Temurin 21         │  │ (dynamic user) │
-     │ (dynamic user)     │  │ (dynamic user)     │  │                │
+     │ Temurin 17         │  │ Temurin 21         │  │ (own sys user) │
+     │ (own sys user)     │  │ (own sys user)     │  │                │
      └────────────────────┘  └────────────────────┘  └────────────────┘
 ```
 
@@ -251,26 +251,27 @@ GUI 버튼(FR-17)은 REST `POST /api/instances/:id/command`로도, 이 WebSocket
 
 ## 5. 컴포넌트 딥다이브
 
-### 5.1 Process Supervisor — systemd-run + 권한 분리 (FR-11, FR-43a)
+### 5.1 Process Supervisor — systemd-run + 권한 분리 (FR-11, FR-43a~c)
 
 인스턴스 시작 시 패널(root)이 실행하는 명령의 형태:
 
 ```
 systemd-run \
   --unit=craftdeck-instance-<id> \
-  --property=DynamicUser=yes \
-  --property=StateDirectory=craftdeck/instances/<id> \
+  --property=User=mc-<id 앞 12자리> \
+  --property=Group=mc-<id 앞 12자리> \
   --property=MemoryMax=<memory_max_mb>M \
   --property=MemorySwapMax=0 \
   --property=CPUQuota=<cpu_quota_percent>% \
   --property=WorkingDirectory=<work_dir> \
   --property=Restart=no \
-  -- /usr/lib/jvm/temurin-<java_major>-jre/bin/java -jar server.jar nogui
+  -- /usr/lib/jvm/temurin-<java_major>-jre-<arch>/bin/java -jar server.jar nogui
 ```
 
-- **계정 모델(확정): 인스턴스별 `DynamicUser`**. 각 서버/프록시 인스턴스는 `systemd-run --property=DynamicUser=yes`로 그때그때 할당되는 전용 임시 UID/GID 아래에서 실행된다. `StateDirectory=`에 인스턴스 ID를 포함시켜 systemd가 `/var/lib/craftdeck/instances/<id>`를 해당 동적 UID 소유로 자동 생성·유지하게 하고, 패널은 인스턴스의 `work_dir`을 항상 이 경로로 고정한다.
-- 인스턴스 재시작 시에도 동일한 유닛 이름(`craftdeck-instance-<id>`)에 대해 systemd가 이전에 할당한 UID를 재사용하므로(같은 유닛명 기준으로 `DynamicUser`가 매핑을 캐시), 재시작 사이 파일 소유권 문제가 생기지 않는다.
-- **트레이드오프**: 한 인스턴스의 플러그인/모드가 RCE로 이어지더라도 다른 인스턴스의 월드 데이터·설정 파일은 서로 다른 UID로 격리되어 접근 불가능하다 — 공유 계정 방식보다 침해 확산 범위가 크게 줄어든다. 대신 (a) 각 인스턴스의 `StateDirectory` 경로/권한을 패널이 정확히 추적·관리해야 하고, (b) 외부 도구(SFTP, 수동 `ls` 디버깅 등)로 특정 인스턴스 파일에 접근하려면 매번 동적 UID를 조회해야 하는 등 운영 편의성 측면의 복잡도가 공유 계정 대비 늘어난다.
+- **계정 모델(확정, 실기 검증 후 수정): 인스턴스별 고정 시스템 계정**. 처음에는 systemd의 `DynamicUser=yes` + `StateDirectory=`로 설계했으나, 실제 라즈베리파이(Debian 13/trixie, arm64)에서 검증한 결과 이 조합이 우리 흐름(인스턴스 생성 시점에 구동기 jar를 미리 받아 작업 디렉터리에 심어두고, 이후 별도 시점에 시작)과 맞지 않았다. systemd는 "pre-existing public StateDirectory 디렉터리를 발견해 마이그레이션했다"는 로그를 남기고도, 실제로는 프로세스가 작업 디렉터리로 진입(`CHDIR`)하는 단계에서 `Permission denied`로 계속 실패했다. 그래서 대신 **패널이 인스턴스 생성 시 `useradd --system --no-create-home --shell /usr/sbin/nologin mc-<id>`로 고정 시스템 계정을 직접 만들고, 파일을 다 내려받은 뒤 그 디렉터리를 `chown -R`로 넘겨주는 방식**으로 확정했다(`internal/process/instanceuser.go`). `systemd-run`은 이 고정 계정을 `--property=User=`/`--property=Group=`으로 지정하기만 하면 된다.
+- **경로 순회 권한(실기에서 발견)**: 최종 작업 디렉터리만 인스턴스 계정 소유로 바꾸는 것으로는 부족하다. 유닉스에서 하위 디렉터리에 CHDIR하려면 경로상의 **모든 상위 디렉터리**에 최소 실행(순회) 권한이 있어야 하므로, `<dataDir>`과 `<dataDir>/instances` 두 단계 모두 `0711`(다른 계정도 통과는 가능하지만 목록은 못 봄)로 만들어야 한다. 또한 데이터 루트를 사용자 홈 디렉터리처럼 기본이 `0700`인 경로 아래 두면, 하위 디렉터리 권한을 아무리 손봐도 그 상위에서 막히므로 반드시 `/var/lib/craftdeck`처럼 처음부터 순회 가능한 전용 경로를 써야 한다.
+- **Java 실행 파일 경로(실기에서 발견)**: Adoptium 패키지가 실제로 설치하는 경로는 `/usr/lib/jvm/temurin-<major>-jre/bin/java`가 아니라 아키텍처 접미사가 붙은 `/usr/lib/jvm/temurin-<major>-jre-<arch>/bin/java`(예: `temurin-21-jre-arm64`)였다.
+- **트레이드오프**: 한 인스턴스의 플러그인/모드가 RCE로 이어지더라도 다른 인스턴스의 월드 데이터·설정 파일은 서로 다른 계정으로 격리되어 접근 불가능하다 — 공유 계정 방식보다 침해 확산 범위가 크게 줄어든다. 대신 인스턴스 삭제 시 계정도 함께 정리(`userdel`)해야 시스템에 유령 계정이 쌓이지 않고, `/etc/passwd`에 인스턴스 수만큼 계정이 늘어난다는 점은 감안해야 한다.
 - 패널은 systemd 유닛 상태(`systemctl is-active craftdeck-instance-<id>`)를 폴링하여 `instances.status`를 갱신하고, 유닛 종료 이벤트(OOM Kill 포함)를 감지해 크래시 여부를 판별한다.
 
 ### 5.2 Loader Manager (FR-1~4)
@@ -300,12 +301,15 @@ type LoaderAdapter interface {
 
 Modrinth API 장애 시(FR-6b) 위 파이프라인 전체가 실패하더라도, 목록 조회/삭제/토글 API는 DB와 로컬 파일시스템만 사용하므로 영향받지 않는다.
 
-### 5.4 RCON Hub & WebSocket Hub (FR-14~20)
+### 5.4 RCON Hub & WebSocket Hub (FR-14~20) — 실기 검증 완료
 
-- 인스턴스 시작 시 `server.properties`에 `enable-rcon=true`, 무작위 RCON 비밀번호/포트를 주입.
-- 패널은 인스턴스당 하나의 상시 RCON 소켓 연결을 유지(재연결 백오프 포함).
-- REST `POST /command`와 WebSocket `{"type":"command"}` 모두 동일한 `RCONClient.Execute(instanceID, cmd)` 함수를 호출 → 실행 결과는 해당 인스턴스를 구독 중인 모든 WebSocket 클라이언트에 브로드캐스트.
-- GUI 버튼(FR-17 목록)은 프론트엔드에서 커맨드 문자열로 조립되어 동일 API로 전송되므로, 백엔드에는 "버튼 전용 코드 경로"가 존재하지 않는다.
+- 인스턴스 생성 시 `server.properties`에 `enable-rcon=true`, `rcon.port`(`game_port + 10000`), 무작위 `rcon.password`를 주입한다(`internal/api/handlers_instance.go`의 `provisionServerFiles`).
+- **RCON 프로토콜**: `internal/rcon/rcon.go`가 Source RCON 와이어 프로토콜(인증/명령 실행 패킷)을 직접 구현한다.
+- **상시 연결 매니저**: `internal/rcon/manager.go`의 `Manager`가 인스턴스당 하나의 지속 연결을 관리한다. `StartMaintaining`은 서버 시작 직후 호출되어, RCON 리스너가 뜰 때까지(부팅 중) 지수 백오프로 자체 재시도하는 백그라운드 goroutine을 띄운다. 연결이 끊기면(`Execute` 실패 감지) 자동으로 재다이얼을 시도한다. `StopMaintaining`은 인스턴스 중지/삭제 시 호출되어 연결을 정리한다.
+- REST `POST /instances/{id}/command`와 WebSocket 콘솔의 `{"type":"command"}` 프레임 모두 동일한 `Manager.Execute(instanceID, cmd)`를 호출한다(FR-18). GUI 버튼은 프론트엔드에서 커맨드 문자열로 조립되어 같은 REST 엔드포인트로 전송되므로, 백엔드에는 "버튼 전용 코드 경로"가 존재하지 않는다.
+- **콘솔 로그 스트리밍**: 별도의 파일 로테이션 파이프라인 대신, `journalctl -u craftdeck-instance-<id> -f -n 50 -o cat`을 서브프로세스로 띄워 그 표준출력을 그대로 WebSocket에 중계한다(`internal/api/handlers_console.go`). systemd가 이미 유닛별 로그를 관리해주므로 이 경로가 가장 단순했다.
+- **그레이스풀 스톱**: `POST /instances/{id}/stop`은 먼저 매니저를 통해 RCON `stop` 명령을 보내고, 유닛이 최대 20초 안에 스스로 종료하는지 폴링한다. 그 안에 안 끝나면 그제서야 `supervisor.Stop`(강제 종료)으로 폴백한다.
+- **실기 검증**: 라즈베리파이에서 실제로 (1) 부팅 중 매니저가 자동 재시도하다 RCON이 뜨자마자 연결 1회 수립, (2) 명령을 연달아 여러 번 보내도 연결 로그가 늘지 않고 재사용됨, (3) RCON `stop` → "월드 저장 완료" 로그 → 11초 내 정상 종료(강제 종료 없음), (4) WebSocket으로 실시간 로그 스트리밍 + 명령 전송 → `cmd_result` 응답 왕복까지 전부 확인했다.
 
 ### 5.5 Proxy Manager (FR-1a~1d)
 
@@ -339,7 +343,7 @@ type MonitorOnlyDDNSAdapter interface {  // ipTime
 
 ### 5.8 Java Runtime & 패키징 (FR-41~45)
 
-- `postinst`: (1) 패널용 전용 시스템 계정 `craftdeck` 생성 (인스턴스 프로세스는 5.1절대로 `DynamicUser`로 그때그때 할당되므로 사전 생성 불필요) → (2) 패키지에 내장된 Adoptium GPG 키로 APT 저장소 등록 → (3) `temurin-8-jre`, `temurin-17-jre`, `temurin-21-jre` 설치(실패 시 설치 중단, FR-42d) → (4) systemd 서비스 enable + start.
+- `postinst`: (1) 패널용 전용 시스템 계정 `craftdeck` 생성 (인스턴스 프로세스용 `mc-<id>` 계정은 5.1절대로 각 인스턴스 생성 시점에 패널이 직접 `useradd`로 만들므로 여기서 사전 생성할 필요 없음) → (2) 패키지에 내장된 Adoptium GPG 키로 APT 저장소 등록 → (3) `temurin-8-jre`, `temurin-17-jre`, `temurin-21-jre` 설치(실패 시 설치 중단, FR-42d) → (4) systemd 서비스 enable + start.
 - Java 버전 선택기는 인스턴스 생성 시 `mc_version`을 파싱해 필요 메이저 버전을 결정하고 `instances.java_major`에 고정 저장 — 이후 마인크래프트 버전이 패치되어도 이미 만든 인스턴스의 Java 버전은 사용자가 명시적으로 바꾸기 전까지 유지된다.
 - `apt upgrade` 중에는 실행 중인 유닛에 `systemctl stop` 대신 RCON `save-all` + graceful `stop` 명령을 우선 시도한 뒤 패키지 파일 교체, 이후 서비스 재기동(FR-45).
 
@@ -356,12 +360,13 @@ type MonitorOnlyDDNSAdapter interface {  // ipTime
 
 ## 7. 트레이드오프 요약
 
-- **컨테이너 미사용**: 오버헤드는 최소화되고, `DynamicUser` 기반 인스턴스별 UID 분리로 파일시스템 격리 수준도 확보했다(5.1절). 다만 네트워크 네임스페이스 격리 등 Docker가 기본 제공하는 일부 격리축은 없다 — 라즈베리파이 자원 제약을 감안한 의도적 트레이드오프.
+- **컨테이너 미사용**: 오버헤드는 최소화되고, 인스턴스별 고정 시스템 계정으로 파일시스템 격리 수준도 확보했다(5.1절). 다만 네트워크 네임스페이스 격리 등 Docker가 기본 제공하는 일부 격리축은 없다 — 라즈베리파이 자원 제약을 감안한 의도적 트레이드오프.
 - **단일 SQLite 파일**: 운영 단순성은 높지만 다중 라이터 동시성은 Postgres류보다 낮음 — 이 프로젝트 규모(개인/소규모 홈랩)에서는 충분하다고 판단.
 - **패널=root 권한**: systemd-run/cgroup 제어를 위한 실용적 선택이지만, 웹 인터페이스 자체의 보안이 곧 시스템 전체의 보안 경계가 된다(리스크 문서화 완료, requirements.md 8절).
-- **인스턴스별 DynamicUser**: 침해 확산 범위를 인스턴스 단위로 좁히는 대가로, `StateDirectory` 경로/동적 UID 추적 등 패널 쪽 구현 복잡도가 공유 계정 방식보다 늘어난다(5.1절). 격리 강화를 우선한 선택.
+- **인스턴스별 고정 시스템 계정 (당초 DynamicUser에서 실기 검증 후 변경)**: 침해 확산 범위를 인스턴스 단위로 좁히는 대가로, 인스턴스 생성/삭제 시마다 시스템 계정을 만들고 지워야 하는 관리 부담이 늘어난다(5.1절). 처음에는 systemd `DynamicUser=yes`로 이 관리 부담 자체를 없애려 했으나, 실제 라즈베리파이에서 검증한 결과 파일을 미리 심어두는 우리 흐름과 맞지 않아 CHDIR 권한 오류가 계속 발생해 고정 계정 방식으로 전환했다.
 
 ## 8. 성장 시 재검토할 지점
 
 - 인스턴스 수가 많아지면(예: 여러 라즈베리파이로 분산) 현재의 "패널=root, 단일 SQLite" 구조는 재검토 필요 — 지금은 요구사항(NFR-3의 단일 Pi 스케일업, 멀티 Pi 클러스터링은 명시적으로 1차 범위 제외)과 일치하므로 현 설계 유지.
 - CurseForge 지원, NeoForge/Quilt/Spigot 구동기 확장은 requirements.md에 이미 백로그로 명시된 대로 Loader/Plugin 어댑터 인터페이스에 구현체만 추가하면 되는 구조로 미리 열어둠.
+- 인스턴스별 고정 시스템 계정 방식은 인스턴스를 생성/삭제할 때마다 `/etc/passwd`/`/etc/group`에 계정을 추가/제거한다 — 인스턴스 수가 매우 많아지는 시나리오(현재 목표 규모를 벗어남)에서는 이 방식의 관리 오버헤드를 재검토할 필요가 있음.
