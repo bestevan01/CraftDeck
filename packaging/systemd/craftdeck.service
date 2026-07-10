@@ -6,10 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 ; Runs as root: craftdeckd calls systemd-run to create per-instance
-; transient units with DynamicUser=yes and cgroup limits (see
-; requirements.md FR-43a, ARCHITECTURE.md section 5.1). Those spawned
-; Minecraft/proxy processes get their own unprivileged dynamic accounts --
-; this User setting is intentionally NOT dropped to a service account.
+; transient units (with cgroup limits) that run as a dedicated, fixed
+; system user per instance -- see requirements.md FR-43a~c,
+; ARCHITECTURE.md section 5.1. This User setting is intentionally NOT
+; dropped to a service account, since craftdeckd itself needs root to
+; create those transient units and per-instance accounts (useradd/chown).
 User=root
 ExecStart=/usr/bin/craftdeckd
 Restart=on-failure
