@@ -7,6 +7,7 @@ package auth
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/pquerna/otp/totp"
@@ -23,6 +24,17 @@ func HashPassword(plain string) (string, error) {
 
 func VerifyPassword(hash, plain string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
+}
+
+// NewSessionID generates a random, URL/cookie-safe session identifier: 32
+// bytes (256 bits) of entropy, hex-encoded so it needs no further escaping
+// as a cookie value.
+func NewSessionID() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate session id: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // GenerateTOTPSecret creates a new TOTP secret plus a QR-code-ready
