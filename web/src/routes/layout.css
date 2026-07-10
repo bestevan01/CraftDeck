@@ -84,4 +84,43 @@
 	body {
 		@apply bg-background text-foreground;
 	}
+
+	/* Every button in the app is a plain unstyled <button> with only a
+	   border or a solid background -- neither had any hover/active state,
+	   so clicks gave no visual feedback at all. This is a global fix
+	   rather than editing each button individually. */
+	button:not(:disabled) {
+		cursor: pointer;
+		transition:
+			background-color 0.12s ease,
+			opacity 0.12s ease,
+			transform 0.06s ease;
+	}
+	button:not(:disabled):active {
+		transform: scale(0.96);
+	}
+
+	/* Outline-style buttons (the vast majority: quick-command buttons,
+	   player/ban/op/whitelist chips) have a transparent background, so give
+	   them a visible tint on hover and a stronger one while pressed. */
+	button.border-border:not(:disabled):hover {
+		background-color: var(--accent);
+	}
+	button.border-border:not(:disabled):active {
+		background-color: var(--muted);
+	}
+
+	/* Solid buttons (bg-primary) already have color, so dim them instead
+	   of tinting -- avoids fighting the chip "selected" state, which also
+	   uses bg-primary. */
+	button.bg-primary:not(:disabled):hover {
+		opacity: 0.9;
+	}
+	button.bg-primary:not(:disabled):active {
+		opacity: 0.8;
+	}
+
+	button:disabled {
+		cursor: not-allowed;
+	}
 }

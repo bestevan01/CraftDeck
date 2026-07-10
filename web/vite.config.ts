@@ -14,5 +14,18 @@ export default defineConfig({
 			},
 			adapter: adapter({ fallback: 'index.html' })
 		})
-	]
+	],
+	server: {
+		// In production the SPA is embedded in and served by craftdeckd
+		// itself (same origin). In dev, `npm run dev` runs on 5173 while
+		// craftdeckd runs separately on 8080 -- proxy both REST and
+		// WebSocket traffic there instead of hardcoding an absolute URL in
+		// the frontend code.
+		proxy: {
+			'/api': {
+				target: 'http://localhost:8080',
+				ws: true
+			}
+		}
+	}
 });
