@@ -41,6 +41,14 @@ func NewSupervisor() *Supervisor {
 // to finish booting (callers should watch IsActive or the RCON connection
 // for that).
 func (s *Supervisor) Start(ctx context.Context, spec StartSpec) error {
+	// A unit that most recently exited via a signal (e.g. a graceful RCON
+	// "stop" racing with our own fallback systemctl stop) is left loaded in
+	// "failed" state indefinitely -- systemd-run then refuses to create a
+	// new transient unit with the same name ("Unit ... was already loaded"),
+	// which is exactly what blocked restarting an instance after a stop.
+	// Clear any such leftover state before asking for a fresh unit.
+	_ = exec.CommandContext(ctx, "systemctl", "reset-failed", unitName(spec.InstanceID)).Run()
+
 	args := []string{
 		"--unit=" + unitName(spec.InstanceID),
 		"--property=User=" + spec.Username,
@@ -48,6 +56,11 @@ func (s *Supervisor) Start(ctx context.Context, spec StartSpec) error {
 		"--property=WorkingDirectory=" + spec.WorkDir,
 		"--property=MemorySwapMax=0",
 		"--property=Restart=no",
+		// Automatically unload the unit as soon as it stops, whether it
+		// exits cleanly or via signal/failure, so it never lingers in
+		// "loaded (failed)" state and blocks a future restart under the
+		// same instance ID.
+		"--property=CollectMode=inactive-or-failed",
 	}
 	if spec.MemoryMaxMB > 0 {
 		args = append(args, fmt.Sprintf("--property=MemoryMax=%dM", spec.MemoryMaxMB))

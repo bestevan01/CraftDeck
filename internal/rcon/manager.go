@@ -19,7 +19,7 @@ type Manager struct {
 
 type managedConn struct {
 	mu     sync.Mutex // serializes Execute calls: RCON has no pipelining
-	client *Client     // nil while (re)connecting
+	client *Client    // nil while (re)connecting
 	cancel context.CancelFunc
 }
 
@@ -32,7 +32,13 @@ func NewManager() *Manager {
 // whenever the connection drops. Call this once the instance's process has
 // been started; it's safe to call again (e.g. on daemon restart
 // reconciliation) since it replaces any prior connection for the same ID.
-func (m *Manager) StartMaintaining(instanceID, addr, password string) {
+//
+// onConnect, if non-nil, fires every time a connection is (re)established --
+// callers use this to know the instance has actually finished booting
+// (RCON only comes up once the server reaches its main loop), since nothing
+// else signals that transition otherwise. May be called from a different
+// goroutine than the caller's.
+func (m *Manager) StartMaintaining(instanceID, addr, password string, onConnect func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -44,7 +50,7 @@ func (m *Manager) StartMaintaining(instanceID, addr, password string) {
 	mc := &managedConn{cancel: cancel}
 	m.conns[instanceID] = mc
 
-	go mc.maintain(ctx, addr, password)
+	go mc.maintain(ctx, addr, password, onConnect)
 }
 
 // StopMaintaining closes the connection for instanceID and stops trying to
@@ -96,7 +102,7 @@ func (mc *managedConn) execute(command string) (string, error) {
 // maintain dials addr in a loop until ctx is cancelled (via StopMaintaining
 // or a replacement StartMaintaining call), storing the live client for
 // execute() to use and clearing it whenever the connection is found dead.
-func (mc *managedConn) maintain(ctx context.Context, addr, password string) {
+func (mc *managedConn) maintain(ctx context.Context, addr, password string, onConnect func()) {
 	backoff := 1 * time.Second
 	const maxBackoff = 15 * time.Second
 
@@ -130,6 +136,10 @@ func (mc *managedConn) maintain(ctx context.Context, addr, password string) {
 		mc.mu.Lock()
 		mc.client = client
 		mc.mu.Unlock()
+
+		if onConnect != nil {
+			onConnect()
+		}
 
 		// Idle until the connection is cleared by a failed execute() call
 		// or ctx is cancelled, then loop around to redial.
