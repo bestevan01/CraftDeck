@@ -12,10 +12,21 @@ import (
 )
 
 // MajorForMCVersion applies requirements.md FR-42's version bands:
-//   - < 1.17      -> Java 8
+//   - < 1.17       -> Java 8
 //   - 1.17..1.20.4 -> Java 17
-//   - >= 1.20.5   -> Java 21
+//   - 1.20.5..26.0 -> Java 21
+//   - >= 26.1      -> Java 25 (FR-42g: Mojang switched to a year.release
+//     version scheme starting with 26.1, and recommends Java 25 from that
+//     version on)
 func MajorForMCVersion(mcVersion string) (int, error) {
+	// Versions under the old "1.x[.y]" scheme all start with "1."; anything
+	// else is the new year.release scheme (e.g. "26.1", "26.2"), which is
+	// unambiguously >= 26.1 since that's where the new scheme started, so it
+	// always maps to Java 25.
+	if !strings.HasPrefix(mcVersion, "1.") {
+		return 25, nil
+	}
+
 	parts, err := parseVersion(mcVersion)
 	if err != nil {
 		return 0, err

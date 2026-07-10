@@ -21,10 +21,12 @@ if [ ! -f /etc/apt/sources.list.d/adoptium.list ]; then
 		> /etc/apt/sources.list.d/adoptium.list
 fi
 
-# 3. Install Java 8/17/21 from Adoptium (FR-42, FR-42a). Fail loudly rather
-#    than continuing with a half-installed service (FR-42d).
+# 3. Install Java 8/17/21/25 from Adoptium (FR-42, FR-42a, FR-42g -- 25 added
+#    for Minecraft 26.1+, which switched to a year.release version scheme and
+#    recommends Java 25). Fail loudly rather than continuing with a
+#    half-installed service (FR-42d).
 apt-get update
-if ! apt-get install -y temurin-8-jre temurin-17-jre temurin-21-jre; then
+if ! apt-get install -y temurin-8-jre temurin-17-jre temurin-21-jre temurin-25-jre; then
 	echo "craftdeck: failed to install Java runtimes from the Adoptium repository." >&2
 	echo "craftdeck: check network connectivity / packages.adoptium.net reachability and re-run 'apt install -f'." >&2
 	exit 1
