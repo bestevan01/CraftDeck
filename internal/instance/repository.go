@@ -70,6 +70,16 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, status Status)
 	return err
 }
 
+// UpdateSettings changes the port/resource-allocation fields an operator can
+// edit while an instance is stopped (FR-12: port and memory/CPU allocation).
+func (r *Repository) UpdateSettings(ctx context.Context, id string, gamePort, rconPort, cpuQuotaPercent, memoryMaxMB int) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE instances
+		SET game_port = ?, rcon_port = ?, cpu_quota_percent = ?, memory_max_mb = ?
+		WHERE id = ?`, gamePort, rconPort, cpuQuotaPercent, memoryMaxMB, id)
+	return err
+}
+
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM instances WHERE id = ?`, id)
 	return err
