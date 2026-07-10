@@ -13,7 +13,11 @@ import (
 // consoleFrame matches the WebSocket protocol in ARCHITECTURE.md section 4.2.
 type consoleFrame struct {
 	Type    string `json:"type"`
-	Line    string `json:"line,omitempty"`
+	// Line intentionally has no omitempty: some RCON commands (e.g. "say")
+	// return an empty string on success, and dropping the key entirely on
+	// an empty result made the frontend receive an undefined "line" for
+	// cmd_result frames, crashing its log-line parser.
+	Line string `json:"line"`
 	Status  string `json:"status,omitempty"`
 	Command string `json:"command,omitempty"`
 	Text    string `json:"text,omitempty"`
