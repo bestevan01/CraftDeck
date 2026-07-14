@@ -37,12 +37,31 @@ export type VanillaVersion = {
 	type: 'release' | 'snapshot' | 'old_beta' | 'old_alpha';
 };
 
+// Mirrors internal/loader.BuildInfo -- one selectable build for a loader
+// that has a genuine per-mc_version build concept (see BuildLister).
+export type BuildInfo = {
+	id: string;
+	channel?: string;
+	time?: string;
+};
+
 export type Backup = {
 	id: string;
 	instance_id: string;
 	filename: string;
 	size_bytes: number;
 	created_at: string;
+};
+
+// Mirrors internal/api's serverSettingValue -- one curated
+// server.properties key the GUI settings form (FR-12) can show/edit.
+export type ServerSetting = {
+	key: string;
+	label: string;
+	description?: string;
+	type: 'bool' | 'int' | 'string' | 'enum';
+	options?: string[];
+	value: string;
 };
 
 export type OpEntry = {
@@ -61,15 +80,97 @@ export type CreateInstanceRequest = {
 	cpu_quota_percent?: number;
 	memory_max_mb?: number;
 	accept_eula: boolean;
-	// Only meaningful for loader: 'paper' -- see internal/api/handlers_instance.go's
-	// handleCreateInstance. Vanilla can't sit behind the proxy at all, so it's
-	// always independently exposed regardless of this flag.
+	// Only meaningful for loader: 'paper' | 'purpur' | 'folia' -- see
+	// internal/api/handlers_instance.go's handleCreateInstance. Vanilla
+	// can't sit behind the proxy at all, so it's always independently
+	// exposed regardless of this flag.
 	expose_independently?: boolean;
 };
 
 export type ServerSubdomain = {
 	registered: boolean;
 	forced_host: string;
+	// The singleton proxy's own game_port, present when registered is true
+	// -- a proxied server is bound to 127.0.0.1 only, so this (not the
+	// server's own game_port) is what a player actually connects to.
+	proxy_port?: number;
+};
+
+export type FileEntry = {
+	name: string;
+	path: string;
+	is_dir: boolean;
+	size: number;
+	mod_time: string;
+};
+
+export type ProxyStatus = {
+	exists: boolean;
+	current_version?: string;
+	latest_version?: string;
+	update_available: boolean;
+};
+
+// Mirrors internal/network.PortMapping (FR-22~24).
+export type PortMapping = {
+	id: string;
+	instance_id?: string;
+	external_port: number;
+	internal_port: number;
+	protocol: 'tcp' | 'udp';
+	method: 'upnp' | 'natpmp' | 'manual';
+	created_at: string;
+};
+
+// Mirrors internal/network.ManualInfo -- shown when neither UPnP nor
+// NAT-PMP could set up the mapping automatically (FR-23).
+export type ManualPortInfo = {
+	local_ip: string;
+	internal_port: number;
+	external_port: number;
+	protocol: string;
+};
+
+// Mirrors internal/api's networkSettingsResponse (FR-21/22/23/25) -- one
+// toggle covers both the web UI port and every directly-reachable
+// Minecraft game port (proxy or independently-exposed server).
+export type NetworkSettings = {
+	wan_enabled: boolean;
+	web_mapping?: PortMapping;
+	manual_info?: ManualPortInfo;
+};
+
+// Mirrors internal/api's networkAddressesResponse -- public_ip is only
+// present while FR-21's WAN toggle is on.
+export type NetworkAddresses = {
+	local_ip: string;
+	public_ip?: string;
+};
+
+// Mirrors internal/ddns.Config -- whether an owned domain or only a free
+// DDNS subdomain is registered decides whether Velocity runs at all
+// (FR-1f). mode/last_known_ip/last_checked_at/mismatch_detected only carry
+// real data for kind=free_subdomain (FR-26/30). cert_renewal_error(_at) only
+// carries real data for kind=main_domain (FR-33a) -- set whenever
+// internal/tlscert.Manager's certmagic-managed Let's Encrypt certificate
+// fails to obtain/renew, cleared the next time one succeeds.
+export type DomainConfig = {
+	id: string;
+	kind: 'main_domain' | 'free_subdomain';
+	provider: string;
+	hostname: string;
+	mode: 'active' | 'monitor';
+	last_known_ip?: string;
+	last_checked_at?: string;
+	mismatch_detected: boolean;
+	cert_renewal_error?: string;
+	cert_renewal_error_at?: string;
+	created_at: string;
+};
+
+export type UpgradeProxyResult = {
+	upgraded: boolean;
+	version: string;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -133,15 +234,62 @@ export type AuthStatus = {
 	authenticated: boolean;
 	lan_bypass: boolean;
 	username: string;
+	totp_enabled: boolean;
+};
+
+export type TOTPSetup = {
+	secret: string;
+	otpauth_url: string;
+	qr_code_png: string;
+};
+
+export type TOTPVerifyResult = {
+	enabled: boolean;
+	backup_codes: string[];
 };
 
 export const api = {
 	authStatus: () => req<AuthStatus>('/api/auth/status'),
 	setup: (username: string, password: string) =>
 		req<void>('/api/auth/setup', { method: 'POST', body: JSON.stringify({ username, password }) }),
-	login: (username: string, password: string) =>
-		req<void>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+	// login resolves (rather than throwing) with { totp_required: true } when
+	// FR-37 requires a code this account hasn't supplied yet -- the frontend
+	// can't know that in advance, so a first attempt omits totpCode and a
+	// second one (once the operator sees totp_required) resends the same
+	// username/password plus the code.
+	login: async (
+		username: string,
+		password: string,
+		totpCode?: string
+	): Promise<{ totp_required: boolean }> => {
+		const res = await fetch('/api/auth/login', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ username, password, totp_code: totpCode || undefined })
+		});
+		if (res.status === 401) {
+			const text = await res.text();
+			try {
+				const parsed = JSON.parse(text);
+				if (parsed && parsed.totp_required) return { totp_required: true };
+			} catch {
+				// not JSON -- an ordinary wrong-credentials/wrong-code message,
+				// fall through to the generic error below.
+			}
+			throw new Error(text || `${res.status} ${res.statusText}`);
+		}
+		if (!res.ok) {
+			const text = await res.text();
+			throw new Error(text || `${res.status} ${res.statusText}`);
+		}
+		return { totp_required: false };
+	},
 	logout: () => req<void>('/api/auth/logout', { method: 'POST' }),
+	// FR-39: setup returns a fresh secret/QR every call (overwriting any
+	// unconfirmed prior attempt) until verify actually turns 2FA on.
+	setupTOTP: () => req<TOTPSetup>('/api/auth/2fa/setup', { method: 'POST' }),
+	verifyTOTP: (code: string) =>
+		req<TOTPVerifyResult>('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }),
 	changePassword: (username: string, currentPassword: string, newPassword: string) =>
 		req<void>('/api/auth/password', {
 			method: 'POST',
@@ -156,8 +304,31 @@ export const api = {
 	createInstance: (body: CreateInstanceRequest) =>
 		req<Instance>('/api/instances', { method: 'POST', body: JSON.stringify(body) }),
 	deleteInstance: (id: string) => req<void>(`/api/instances/${id}`, { method: 'DELETE' }),
+	// FR-3: a custom/unlisted loader has no adapter to auto-download a jar,
+	// so this is the only way it gets one -- called right after
+	// createInstance for a loader the create form doesn't otherwise
+	// recognize. Also works on any other instance to manually swap its jar.
+	uploadServerJar: async (id: string, file: File) => {
+		const form = new FormData();
+		form.append('jar', file);
+		const res = await fetch(`/api/instances/${id}/jar`, { method: 'POST', body: form });
+		if (!res.ok) {
+			const text = await res.text();
+			if (res.status === 401) window.location.href = '/login';
+			throw new Error(text || `${res.status} ${res.statusText}`);
+		}
+	},
 	updateInstance: (id: string, body: { cpu_quota_percent: number; memory_max_mb: number }) =>
 		req<Instance>(`/api/instances/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+	// FR-4, scoped to "redownload the same loader for the same mc_version" --
+	// see handleReinstallLoader. Omit loaderVersion (or pass '') for "always
+	// latest"; pass a loader.BuildInfo.ID from listLoaderBuilds to pin one
+	// specific build instead.
+	reinstallLoader: (id: string, loaderVersion?: string) =>
+		req<{ ok: boolean }>(`/api/instances/${id}/reinstall`, {
+			method: 'POST',
+			body: JSON.stringify({ loader_version: loaderVersion ?? '' })
+		}),
 	startInstance: (id: string) => req<void>(`/api/instances/${id}/start`, { method: 'POST' }),
 	stopInstance: (id: string) => req<void>(`/api/instances/${id}/stop`, { method: 'POST' }),
 	restartInstance: (id: string) => req<void>(`/api/instances/${id}/restart`, { method: 'POST' }),
@@ -172,9 +343,30 @@ export const api = {
 	listOps: (id: string) => req<OpEntry[]>(`/api/instances/${id}/ops`),
 	listWhitelist: (id: string) =>
 		req<{ enabled: boolean; players: string[] }>(`/api/instances/${id}/whitelist`),
+	// FR-12: curated GUI form over server.properties -- see the general file
+	// manager (handlers_files.go) for raw/advanced editing instead.
+	getServerSettings: (id: string) => req<ServerSetting[]>(`/api/instances/${id}/settings`),
+	setServerSettings: (id: string, updates: Record<string, string>) =>
+		req<{ ok: boolean }>(`/api/instances/${id}/settings`, {
+			method: 'PUT',
+			body: JSON.stringify(updates)
+		}),
 	systemResources: () => req<SystemResources>('/api/system/resources'),
 	listVanillaVersions: () => req<VanillaVersion[]>('/api/loaders/vanilla/versions'),
 	listPaperVersions: () => req<string[]>('/api/loaders/paper/versions'),
+	listPurpurVersions: () => req<string[]>('/api/loaders/purpur/versions'),
+	listFoliaVersions: () => req<string[]>('/api/loaders/folia/versions'),
+	listPufferfishVersions: () => req<string[]>('/api/loaders/pufferfish/versions'),
+	listLeafVersions: () => req<string[]>('/api/loaders/leaf/versions'),
+	listFabricVersions: () => req<string[]>('/api/loaders/fabric/versions'),
+	listNeoForgeVersions: () => req<string[]>('/api/loaders/neoforge/versions'),
+	// Empty array (not an error) for a loader whose adapter doesn't support
+	// build-pinning (e.g. vanilla, pufferfish, fabric) -- see
+	// handleListLoaderBuilds.
+	listLoaderBuilds: (loaderName: string, mcVersion: string) =>
+		req<BuildInfo[]>(
+			`/api/loaders/${loaderName}/builds?mc_version=${encodeURIComponent(mcVersion)}`
+		),
 	// Subdomain (forced-host) is keyed by the server's own instance ID, not
 	// the proxy's -- the proxy is hidden from the UI entirely, so this is
 	// how each server's own console page manages its own subdomain.
@@ -184,6 +376,85 @@ export const api = {
 			method: 'PUT',
 			body: JSON.stringify({ forced_host: forcedHost })
 		}),
+	// Manual escape hatch for a custom/unlisted loader (FR-3) that
+	// supportsVelocityForwarding doesn't recognize, so it was never added to
+	// the proxy automatically at creation -- see handlers_proxy.go.
+	registerBehindProxy: (id: string) =>
+		req<{ forwarding_secret: string }>(`/api/instances/${id}/proxy/register`, { method: 'POST' }),
+	unregisterFromProxy: (id: string) =>
+		req<{ ok: boolean }>(`/api/instances/${id}/proxy/unregister`, { method: 'POST' }),
+	getProxyStatus: () => req<ProxyStatus>('/api/proxy/status'),
+	// File manager (FR-12 and beyond): Explorer/Finder-style browsing of an
+	// instance's whole work dir -- list/read/write/download/upload/rename/
+	// delete, all path-traversal-checked server-side (see
+	// resolveInstancePath in internal/api/handlers_files.go).
+	listFiles: (id: string, path: string) =>
+		req<FileEntry[]>(`/api/instances/${id}/files?path=${encodeURIComponent(path)}`),
+	getFileContent: (id: string, path: string) =>
+		req<{ content: string }>(`/api/instances/${id}/files/content?path=${encodeURIComponent(path)}`),
+	setFileContent: (id: string, path: string, content: string) =>
+		req<{ ok: boolean }>(`/api/instances/${id}/files/content?path=${encodeURIComponent(path)}`, {
+			method: 'PUT',
+			body: JSON.stringify({ content })
+		}),
+	downloadFileURL: (id: string, path: string) =>
+		`/api/instances/${id}/files/download?path=${encodeURIComponent(path)}`,
+	uploadFile: async (id: string, dirPath: string, file: File) => {
+		const form = new FormData();
+		form.append('file', file);
+		// Not routed through req(): a multipart body needs the browser to set
+		// its own Content-Type (with boundary), which req() would override by
+		// always forcing application/json.
+		const res = await fetch(`/api/instances/${id}/files/upload?path=${encodeURIComponent(dirPath)}`, {
+			method: 'POST',
+			body: form
+		});
+		if (!res.ok) {
+			const text = await res.text();
+			if (res.status === 401) window.location.href = '/login';
+			throw new Error(text || `${res.status} ${res.statusText}`);
+		}
+		return (await res.json()) as FileEntry;
+	},
+	renameFile: (id: string, from: string, to: string) =>
+		req<{ ok: boolean }>(`/api/instances/${id}/files/rename`, {
+			method: 'PUT',
+			body: JSON.stringify({ from, to })
+		}),
+	deleteFile: (id: string, path: string) =>
+		req<void>(`/api/instances/${id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+	upgradeProxy: () => req<UpgradeProxyResult>('/api/proxy/upgrade', { method: 'POST' }),
+	// FR-21/22/23/25: "외부 접속 허용" toggle (web UI + every reachable game
+	// port) + UPnP/NAT-PMP automation.
+	getNetworkSettings: () => req<NetworkSettings>('/api/network/settings'),
+	setWANEnabled: (enabled: boolean) =>
+		req<NetworkSettings>('/api/network/settings', {
+			method: 'PUT',
+			body: JSON.stringify({ wan_enabled: enabled })
+		}),
+	// FR-24: review/revoke individual port-forwarding rules CraftDeck registered.
+	listPortMappings: () => req<PortMapping[]>('/api/network/port-mappings'),
+	deletePortMapping: (id: string) =>
+		req<{ ok: boolean }>(`/api/network/port-mappings/${id}`, { method: 'DELETE' }),
+	// FR-26 minimal skeleton + FR-1f: registering/clearing this decides
+	// whether Velocity runs at all (see ReconcileProxyMode).
+	// 접속 주소 복사 버튼(사설/공인 IP) -- public_ip는 외부 접속이 켜져 있을 때만 채워짐.
+	getNetworkAddresses: () => req<NetworkAddresses>('/api/network/addresses'),
+	getDomainSettings: () => req<DomainConfig | { registered: false }>('/api/domain/settings'),
+	// token is the provider API credential (FR-26c, e.g. DuckDNS's token) --
+	// required for an active-renewal provider, omit/ignore for a
+	// monitor-only one (ipTime, FR-26e) or main_domain.
+	setDomainSettings: (
+		kind: 'main_domain' | 'free_subdomain',
+		provider: string,
+		hostname: string,
+		token?: string
+	) =>
+		req<DomainConfig>('/api/domain/settings', {
+			method: 'PUT',
+			body: JSON.stringify({ kind, provider, hostname, token })
+		}),
+	deleteDomainSettings: () => req<{ ok: boolean }>('/api/domain/settings', { method: 'DELETE' }),
 	listBackups: (id: string) => req<Backup[]>(`/api/instances/${id}/backups`),
 	createBackup: (id: string) => req<Backup>(`/api/instances/${id}/backups`, { method: 'POST' }),
 	restoreBackup: (id: string, backupId: string) =>

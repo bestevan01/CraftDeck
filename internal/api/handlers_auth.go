@@ -1,11 +1,17 @@
 package api
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"craftdeck/internal/auth"
+
+	"github.com/skip2/go-qrcode"
 )
 
 const sessionCookieName = "craftdeck_session"
@@ -75,16 +81,25 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		// lan_bypass tells the frontend requireAuth won't actually demand a
 		// session for this client right now (see router.go) -- so it should
 		// skip the login redirect even if authenticated is false.
-		"lan_bypass": isLANRequest(r),
+		"lan_bypass": s.authBypassed(r),
 		// username lets the frontend's change-password form identify the
 		// account without asking the operator to retype who they are.
 		"username": username,
+		// totp_enabled lets the network-settings page decide whether to send
+		// the operator through 2FA setup before letting them turn WAN
+		// exposure on (FR-38) or just show "already enabled".
+		"totp_enabled": authenticated && user.TOTPEnabled,
 	})
 }
 
 type credentialsRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	// TOTPCode is required on a second submission once handleLogin has
+	// already told the frontend totp_required (FR-37) -- omitted on the
+	// first attempt, when the frontend doesn't yet know whether this
+	// account has 2FA enabled.
+	TOTPCode string `json:"totp_code,omitempty"`
 }
 
 // handleSetup creates the single admin account this tool ever has. It only
@@ -131,6 +146,24 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+// loginLockoutPolicy implements FR-33(b): once the web UI port is actually
+// exposed to the WAN (FR-21/25's toggle), brute-forcing the login becomes a
+// real threat from anywhere on the internet, not just whoever's already on
+// the home network -- so the threshold/lockout duration auto-switches to a
+// stricter default the moment that's true, with no separate setting for the
+// operator to remember to configure.
+func (s *Server) loginLockoutPolicy(ctx context.Context) (maxAttempts int, lockoutDuration time.Duration) {
+	if settings, err := s.networkSettings.Get(ctx); err == nil && settings.WANEnabled {
+		return 5, 15 * time.Minute
+	}
+	return 10, 5 * time.Minute
+}
+
+// handleLogin implements FR-35 on top of the basic username/password check:
+// an account already locked out is rejected before its password is even
+// checked (locked-out attempts don't get to keep guessing), a wrong
+// password counts against the lockout threshold (locking the account
+// outright once it's reached), and a correct one clears the counter.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req credentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -139,11 +172,64 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := s.users.GetUserByUsername(r.Context(), req.Username)
-	if err != nil || !auth.VerifyPassword(user.PasswordHash, req.Password) {
-		// Same message either way -- don't reveal whether the username
-		// exists.
+	if err != nil {
+		// Same message as a wrong password -- don't reveal whether the
+		// username exists.
 		http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		return
+	}
+	if user.Locked() {
+		http.Error(w, fmt.Sprintf("too many failed attempts -- account locked until %s", user.LockedUntil.Format(time.RFC3339)), http.StatusTooManyRequests)
+		return
+	}
+
+	if !auth.VerifyPassword(user.PasswordHash, req.Password) {
+		maxAttempts, lockoutDuration := s.loginLockoutPolicy(r.Context())
+		locked, until, lockErr := s.users.RecordFailedLogin(r.Context(), user.ID, maxAttempts, lockoutDuration)
+		if lockErr != nil {
+			log.Printf("record failed login for %s: %v", user.Username, lockErr)
+		}
+		if locked {
+			http.Error(w, fmt.Sprintf("too many failed attempts -- account locked until %s", until.Format(time.RFC3339)), http.StatusTooManyRequests)
+			return
+		}
+		http.Error(w, "invalid username or password", http.StatusUnauthorized)
+		return
+	}
+
+	// FR-37: password alone isn't enough once 2FA is enabled -- the
+	// frontend doesn't know that in advance, so a first submission with no
+	// code gets a distinct "totp_required" response (not counted as a
+	// failed attempt -- the password was correct) telling it to ask for one
+	// and resubmit the same request with totp_code filled in.
+	if user.TOTPEnabled {
+		if req.TOTPCode == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]bool{"totp_required": true})
+			return
+		}
+		ok, backupIndex := verifyTOTPOrBackupCode(user, req.TOTPCode)
+		if !ok {
+			maxAttempts, lockoutDuration := s.loginLockoutPolicy(r.Context())
+			locked, until, lockErr := s.users.RecordFailedLogin(r.Context(), user.ID, maxAttempts, lockoutDuration)
+			if lockErr != nil {
+				log.Printf("record failed login for %s: %v", user.Username, lockErr)
+			}
+			if locked {
+				http.Error(w, fmt.Sprintf("too many failed attempts -- account locked until %s", until.Format(time.RFC3339)), http.StatusTooManyRequests)
+				return
+			}
+			http.Error(w, "invalid two-factor code", http.StatusUnauthorized)
+			return
+		}
+		if backupIndex >= 0 {
+			if err := s.users.ConsumeBackupCode(r.Context(), user.ID, user.BackupCodeHashes, backupIndex); err != nil {
+				log.Printf("consume backup code for %s: %v", user.Username, err)
+			}
+		}
+	}
+
+	if err := s.users.ResetFailedLogins(r.Context(), user.ID); err != nil {
+		log.Printf("reset failed logins for %s: %v", user.Username, err)
 	}
 
 	sessionID, expiresAt, err := s.users.CreateSession(r.Context(), user.ID)
@@ -202,12 +288,121 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// TODO(auth): wire these to internal/auth's TOTP helpers (already
-// implemented) once FR-37's WAN-exposure-triggered 2FA enforcement is built.
-func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+// verifyTOTPOrBackupCode checks code against the account's real TOTP
+// secret first, then each unused backup code (FR-39's recovery path) if
+// that fails. Returns the matched backup code's index (for
+// ConsumeBackupCode) or -1 when it was the TOTP code (or nothing) that
+// matched.
+func verifyTOTPOrBackupCode(user *auth.User, code string) (ok bool, backupIndex int) {
+	if auth.ValidateTOTPCode(user.TOTPSecret, code) {
+		return true, -1
+	}
+	for i, hash := range user.BackupCodeHashes {
+		if auth.VerifyPassword(hash, code) {
+			return true, i
+		}
+	}
+	return false, -1
 }
 
+// handleTOTPSetup starts FR-39's enrollment flow: generates a fresh secret
+// (stored but not yet trusted -- see SetPendingTOTPSecret) and returns a
+// scannable QR code plus the raw secret for manual entry. Only usable while
+// 2FA isn't already enabled -- swapping an active account's secret without
+// re-proving control of the old one is a bigger security hole than this
+// tool needs to solve right now (FR-39's backup codes are the intended
+// recovery path for a lost authenticator).
+func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	if user.TOTPEnabled {
+		http.Error(w, "two-factor authentication is already enabled", http.StatusConflict)
+		return
+	}
+
+	secret, otpauthURL, err := auth.GenerateTOTPSecret(user.Username, "CraftDeck")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.users.SetPendingTOTPSecret(r.Context(), user.ID, secret); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	png, err := qrcode.Encode(otpauthURL, qrcode.Medium, 256)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"secret":      secret,
+		"otpauth_url": otpauthURL,
+		"qr_code_png": "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+	})
+}
+
+type totpVerifyRequest struct {
+	Code string `json:"code"`
+}
+
+// handleTOTPVerify completes enrollment: the operator proves they actually
+// captured the secret (scanned the QR, or copied it in manually) by
+// submitting one valid code back. Only then does 2FA actually turn on --
+// FR-38's gate on enabling WAN exposure checks totp_enabled, not just
+// whether a secret happens to exist, precisely so an abandoned/never-
+// confirmed setup attempt can't be mistaken for real coverage. Backup
+// codes (FR-39) are generated here and returned exactly once -- the
+// operator has to save them now, since only their bcrypt hashes are kept
+// from this point on.
 func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	user, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	if user.TOTPEnabled {
+		http.Error(w, "two-factor authentication is already enabled", http.StatusConflict)
+		return
+	}
+	if user.TOTPSecret == "" {
+		http.Error(w, "call /api/auth/2fa/setup first", http.StatusBadRequest)
+		return
+	}
+
+	var req totpVerifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if !auth.ValidateTOTPCode(user.TOTPSecret, req.Code) {
+		http.Error(w, "invalid code", http.StatusUnauthorized)
+		return
+	}
+
+	backupCodes, err := auth.GenerateBackupCodes(8)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	hashes := make([]string, len(backupCodes))
+	for i, code := range backupCodes {
+		hash, err := auth.HashPassword(code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		hashes[i] = hash
+	}
+	if err := s.users.EnableTOTP(r.Context(), user.ID, hashes); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":      true,
+		"backup_codes": backupCodes,
+	})
 }

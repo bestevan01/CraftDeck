@@ -8,6 +8,11 @@
 	let password = $state('');
 	let error = $state('');
 	let submitting = $state(false);
+	// FR-37: set once handleLogin reports totp_required for this
+	// username/password -- shows the code field and resubmits the same
+	// credentials with it filled in.
+	let needsTotp = $state(false);
+	let totpCode = $state('');
 
 	onMount(async () => {
 		try {
@@ -36,7 +41,12 @@
 			if (mode === 'setup') {
 				await api.setup(username, password);
 			} else {
-				await api.login(username, password);
+				const result = await api.login(username, password, needsTotp ? totpCode : undefined);
+				if (result.totp_required) {
+					needsTotp = true;
+					submitting = false;
+					return;
+				}
 			}
 			await goto('/');
 		} catch (err) {
@@ -90,6 +100,21 @@
 						<p class="text-muted-foreground mt-1 text-xs">8자 이상</p>
 					{/if}
 				</div>
+				{#if needsTotp}
+					<div>
+						<label class="mb-1 block text-sm font-medium" for="totp-code">2단계 인증 코드</label>
+						<input
+							id="totp-code"
+							type="text"
+							inputmode="numeric"
+							autocomplete="one-time-code"
+							required
+							placeholder="인증 앱의 6자리 코드 (또는 백업 코드)"
+							bind:value={totpCode}
+							class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+						/>
+					</div>
+				{/if}
 				{#if error}
 					<p class="text-destructive text-sm">{error}</p>
 				{/if}
