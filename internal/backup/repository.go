@@ -68,6 +68,16 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+// DeleteByInstance removes every backup record for instanceID -- called
+// when the instance itself is deleted (see handleDeleteInstance), since
+// `backups.instance_id` has a foreign key on `instances(id)` with no
+// ON DELETE CASCADE, so leftover rows would otherwise make the instance
+// delete itself fail with a foreign key constraint error.
+func (r *Repository) DeleteByInstance(ctx context.Context, instanceID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM backups WHERE instance_id = ?`, instanceID)
+	return err
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

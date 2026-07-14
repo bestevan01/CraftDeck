@@ -80,6 +80,24 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, gamePort, rc
 	return err
 }
 
+// UpdateVersion records a new mc_version after an instance's jar has been
+// replaced in place (currently only used to upgrade the singleton Velocity
+// proxy -- see handleUpgradeProxy -- since every other instance's version
+// is fixed at creation and changed by recreating it instead).
+func (r *Repository) UpdateVersion(ctx context.Context, id, mcVersion string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE instances SET mc_version = ? WHERE id = ?`, mcVersion, id)
+	return err
+}
+
+// UpdateLoaderVersion records which build (BuildLister.BuildInfo.ID) is
+// currently installed after a pinned reinstall (FR-4's build-selection
+// extension) -- empty string means "always latest", matching a freshly
+// created instance's default.
+func (r *Repository) UpdateLoaderVersion(ctx context.Context, id, loaderVersion string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE instances SET loader_version = ? WHERE id = ?`, loaderVersion, id)
+	return err
+}
+
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM instances WHERE id = ?`, id)
 	return err

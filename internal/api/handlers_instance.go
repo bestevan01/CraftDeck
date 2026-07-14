@@ -1,12 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"craftdeck/internal/instance"
 	"craftdeck/internal/javaruntime"
 	"craftdeck/internal/loader"
+	"craftdeck/internal/modrinth"
 	"craftdeck/internal/process"
 
 	"github.com/google/uuid"
@@ -67,6 +70,21 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	if !req.AcceptEula {
 		http.Error(w, "accept_eula must be true to create a Minecraft server instance (see https://www.minecraft.net/eula)", http.StatusBadRequest)
 		return
+	}
+	if strings.TrimSpace(req.Loader) == "" {
+		http.Error(w, "loader is required", http.StatusBadRequest)
+		return
+	}
+	if req.LoaderVersion != "" {
+		adapter, ok := loader.Get(req.Loader)
+		if !ok {
+			http.Error(w, "unknown loader", http.StatusBadRequest)
+			return
+		}
+		if _, ok := adapter.(loader.BuildLister); !ok {
+			http.Error(w, fmt.Sprintf("%s doesn't support pinning a specific build", req.Loader), http.StatusBadRequest)
+			return
+		}
 	}
 
 	// The operator never needs to know or choose a game_port: every server
@@ -120,11 +138,28 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Vanilla has no plugin system at all, so it structurally can't trust
-	// Velocity's modern-forwarding secret (see resolveProxyBackendEntries)
-	// -- it's always independently exposed regardless of what the operator
-	// asked for. Paper defaults to sitting behind the proxy unless the
-	// operator explicitly opts out.
-	behindProxy := strings.EqualFold(req.Loader, "paper") && !req.ExposeIndependently
+	// Velocity's modern-forwarding secret (see resolveProxyBackendEntries) --
+	// it's always independently exposed regardless of what the operator
+	// asked for. Paper/Purpur/Folia all carry the same proxies.velocity
+	// config forward, so any of them defaults to sitting behind the proxy
+	// unless the operator explicitly opts out. NeoForge additionally needs
+	// its forwarding mod to actually have a build for this exact Minecraft
+	// version (supportsVelocityForwardingForVersion) -- on an unsupported
+	// version it falls back to independent exposure just like Vanilla,
+	// rather than failing creation over something the operator can't fix.
+	//
+	// FR-1f: none of that matters without a real owned domain registered
+	// (internal/ddns) -- forced-host subdomain routing needs actual DNS to
+	// be reachable, and a free-subdomain provider can only ever point at
+	// one server anyway (FR-27), so Velocity is disabled entirely in that
+	// case (see ReconcileProxyMode) and every server defaults to
+	// independent exposure regardless of loader/version.
+	hasMainDomain, err := s.domains.HasMainDomain(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	behindProxy := hasMainDomain && supportsVelocityForwardingForVersion(r.Context(), req.Loader, req.MCVersion) && !req.ExposeIndependently
 
 	// Fetch (creating if this is the very first server) the proxy's
 	// forwarding secret *before* provisioning so paper-global.yml can be
@@ -224,25 +259,41 @@ func provisionServerFiles(ctx context.Context, inst *instance.Instance, bindLoop
 	}
 
 	if forwardingSecret != "" {
-		configDir := filepath.Join(inst.WorkDir, "config")
-		if err := os.MkdirAll(configDir, 0o750); err != nil {
-			return fmt.Errorf("create config dir: %w", err)
-		}
-		// Paper's config loader fills in every key this file doesn't
-		// specify with its own defaults on first boot, so seeding just the
-		// proxies.velocity block is enough -- no need to reproduce the rest
-		// of paper-global.yml here.
-		globalYML := fmt.Sprintf(
-			"proxies:\n  velocity:\n    enabled: true\n    online-mode: true\n    secret: '%s'\n",
-			forwardingSecret,
-		)
-		if err := os.WriteFile(filepath.Join(configDir, "paper-global.yml"), []byte(globalYML), 0o640); err != nil {
-			return fmt.Errorf("write paper-global.yml: %w", err)
+		switch {
+		case strings.EqualFold(inst.Loader, "fabric"):
+			// Fabric has no built-in equivalent of Paper's proxies.velocity
+			// config -- FabricProxy-Lite (+ its Fabric API dependency) is
+			// what makes a Fabric server trust the proxy's secret at all.
+			if err := installFabricProxyMods(ctx, inst, forwardingSecret); err != nil {
+				return fmt.Errorf("install fabric proxy mods: %w", err)
+			}
+		case strings.EqualFold(inst.Loader, "neoforge"):
+			// Same idea as Fabric above, but NeoForge's equivalent mod is
+			// NeoVelocity.
+			if err := installNeoForgeProxyMod(ctx, inst, forwardingSecret); err != nil {
+				return fmt.Errorf("install neoforge proxy mod: %w", err)
+			}
+		default:
+			configDir := filepath.Join(inst.WorkDir, "config")
+			if err := os.MkdirAll(configDir, 0o750); err != nil {
+				return fmt.Errorf("create config dir: %w", err)
+			}
+			// Paper's config loader fills in every key this file doesn't
+			// specify with its own defaults on first boot, so seeding just the
+			// proxies.velocity block is enough -- no need to reproduce the rest
+			// of paper-global.yml here.
+			globalYML := fmt.Sprintf(
+				"proxies:\n  velocity:\n    enabled: true\n    online-mode: true\n    secret: '%s'\n",
+				forwardingSecret,
+			)
+			if err := os.WriteFile(filepath.Join(configDir, "paper-global.yml"), []byte(globalYML), 0o640); err != nil {
+				return fmt.Errorf("write paper-global.yml: %w", err)
+			}
 		}
 	}
 
 	if adapter, ok := loader.Get(inst.Loader); ok {
-		if _, err := adapter.Download(ctx, inst.MCVersion, inst.WorkDir); err != nil {
+		if err := downloadLoaderJar(ctx, adapter, inst.MCVersion, inst.LoaderVersion, inst.WorkDir); err != nil {
 			return fmt.Errorf("download %s server jar: %w", inst.Loader, err)
 		}
 	} // else: no adapter yet for this loader; upload jar manually (FR-3)
@@ -257,6 +308,106 @@ func provisionServerFiles(ctx context.Context, inst *instance.Instance, bindLoop
 	return nil
 }
 
+// downloadLoaderJar resolves to adapter.DownloadBuild when loaderVersion is
+// pinned (validated against BuildLister support by the caller -- see
+// handleCreateInstance and handleReinstallLoader), otherwise adapter.Download
+// for the usual "whatever's newest" behavior.
+func downloadLoaderJar(ctx context.Context, adapter loader.Adapter, mcVersion, loaderVersion, destDir string) error {
+	if loaderVersion == "" {
+		_, err := adapter.Download(ctx, mcVersion, destDir)
+		return err
+	}
+	lister, ok := adapter.(loader.BuildLister)
+	if !ok {
+		return fmt.Errorf("this loader doesn't support pinning a specific build")
+	}
+	_, err := lister.DownloadBuild(ctx, mcVersion, loaderVersion, destDir)
+	return err
+}
+
+// installFabricProxyMods downloads FabricProxy-Lite and its Fabric API
+// dependency from Modrinth into mods/, and pre-seeds FabricProxy-Lite's
+// config with the proxy's forwarding secret. Fabric has no built-in
+// equivalent of Paper's proxies.velocity config (see
+// supportsVelocityForwarding), so without this a Fabric server behind the
+// proxy would just reject every connection as untrusted.
+func installFabricProxyMods(ctx context.Context, inst *instance.Instance, forwardingSecret string) error {
+	modsDir := filepath.Join(inst.WorkDir, "mods")
+	if err := os.MkdirAll(modsDir, 0o750); err != nil {
+		return fmt.Errorf("create mods dir: %w", err)
+	}
+
+	for _, projectID := range []string{"fabric-api", "fabricproxy-lite"} {
+		version, err := modrinth.BestVersion(ctx, projectID, "fabric", inst.MCVersion)
+		if err != nil {
+			return fmt.Errorf("find %s for fabric %s: %w", projectID, inst.MCVersion, err)
+		}
+		file, err := version.PrimaryFile()
+		if err != nil {
+			return fmt.Errorf("%s has no download: %w", projectID, err)
+		}
+		destPath := filepath.Join(modsDir, file.Filename)
+		if err := downloadAndVerifySHA512(ctx, file.URL, file.Hashes["sha512"], destPath); err != nil {
+			return fmt.Errorf("download %s: %w", projectID, err)
+		}
+	}
+
+	configDir := filepath.Join(inst.WorkDir, "config")
+	if err := os.MkdirAll(configDir, 0o750); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	// FabricProxy-Lite fills in every other key with its own default the
+	// first time it runs, so seeding just the secret is enough.
+	toml := fmt.Sprintf("secret = \"%s\"\n", forwardingSecret)
+	if err := os.WriteFile(filepath.Join(configDir, "FabricProxy-Lite.toml"), []byte(toml), 0o640); err != nil {
+		return fmt.Errorf("write FabricProxy-Lite.toml: %w", err)
+	}
+	return nil
+}
+
+// installNeoForgeProxyMod downloads "NeoForged Velocity Support" (Modrinth
+// slug "neoforged-velocity-support") into mods/ and writes the proxy's
+// forwarding secret to a plain forwarding.secret file in the instance's
+// work dir root -- NeoForge's equivalent of installFabricProxyMods above.
+//
+// This isn't NeoVelocity, despite that being the more well-known option:
+// NeoVelocity 1.2.6 only implements Velocity's original ("v1") modern
+// forwarding and throws a bare UnsupportedOperationException on login for
+// anything using the newer forwarding versions modern Minecraft actually
+// negotiates (signed/secure chat requires it) -- reproduced on real
+// hardware against MC 1.21.11 and confirmed as a known, unfixed upstream
+// bug the maintainer has no timeline for (github.com/Gabwasnt/NeoVelocity
+// issue #31). NeoForged Velocity Support is a from-scratch reimplementation
+// modeled directly on Paper's own VelocityProxy class and supports up
+// through forwarding version 4 (MODERN_LAZY_SESSION), and reads the secret
+// as a plain file rather than a mod-config-library-parsed TOML, sidestepping
+// the NeoForge config system silently reformatting/rejecting a hand-written
+// file the way it did for NeoVelocity's config (see git history).
+func installNeoForgeProxyMod(ctx context.Context, inst *instance.Instance, forwardingSecret string) error {
+	modsDir := filepath.Join(inst.WorkDir, "mods")
+	if err := os.MkdirAll(modsDir, 0o750); err != nil {
+		return fmt.Errorf("create mods dir: %w", err)
+	}
+
+	version, err := modrinth.BestVersion(ctx, "neoforged-velocity-support", "neoforge", inst.MCVersion)
+	if err != nil {
+		return fmt.Errorf("find neoforged-velocity-support for neoforge %s: %w", inst.MCVersion, err)
+	}
+	file, err := version.PrimaryFile()
+	if err != nil {
+		return fmt.Errorf("neoforged-velocity-support has no download: %w", err)
+	}
+	destPath := filepath.Join(modsDir, file.Filename)
+	if err := downloadAndVerifySHA512(ctx, file.URL, file.Hashes["sha512"], destPath); err != nil {
+		return fmt.Errorf("download neoforged-velocity-support: %w", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(inst.WorkDir, "forwarding.secret"), []byte(forwardingSecret), 0o640); err != nil {
+		return fmt.Errorf("write forwarding.secret: %w", err)
+	}
+	return nil
+}
+
 func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	inst, err := s.instances.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -264,6 +415,148 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inst)
+}
+
+// maxServerJarBytes caps a direct server.jar upload (FR-3) -- generous
+// enough for a modpack-bundled server jar (much bigger than a plain
+// loader's), well under what the Pi's disk realistically needs to guard
+// against.
+const maxServerJarBytes = 500 << 20 // 500MiB
+
+// handleUploadServerJar accepts a direct server.jar upload (FR-3),
+// replacing whatever's currently at inst.WorkDir/server.jar. This is the
+// only way to give an instance created with a custom/unlisted loader (no
+// adapter in internal/loader's registry, so provisionServerFiles silently
+// skips the automatic download -- see its doc comment) an actual jar to
+// run, but works for any instance -- e.g. manually swapping in a
+// different build of a loader CraftDeck does support.
+func (s *Server) handleUploadServerJar(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	inst, err := s.instances.Get(ctx, r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	if inst.Status != instance.StatusStopped && inst.Status != instance.StatusCrashed {
+		http.Error(w, "instance must be stopped before replacing its server jar", http.StatusConflict)
+		return
+	}
+
+	// http.MaxBytesReader (not just ParseMultipartForm's maxMemory arg,
+	// which only bounds in-memory buffering and happily spills the rest to
+	// disk unbounded) actually rejects a request whose body exceeds the
+	// limit, confirmed necessary for FR-40's size validation.
+	r.Body = http.MaxBytesReader(w, r.Body, maxServerJarBytes)
+	if err := r.ParseMultipartForm(maxServerJarBytes); err != nil {
+		http.Error(w, "invalid multipart form or file too large (max 500MB): "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("jar")
+	if err != nil {
+		http.Error(w, "missing 'jar' file field", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".jar") {
+		http.Error(w, "only .jar files are accepted", http.StatusBadRequest)
+		return
+	}
+	validated, err := requireJarMagicBytes(file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	destPath := filepath.Join(inst.WorkDir, "server.jar")
+	out, err := os.Create(destPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := io.Copy(out, validated); err != nil {
+		out.Close()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := out.Close(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	chownInstanceFile(ctx, inst.ID, destPath)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// reinstallLoaderRequest's LoaderVersion is optional -- empty means "whatever
+// build the loader's distribution point currently considers newest" (the
+// original FR-4 behavior); set it (to a loader.BuildInfo.ID from
+// GET /api/loaders/{loader}/builds) to pin a specific build instead.
+type reinstallLoaderRequest struct {
+	LoaderVersion string `json:"loader_version"`
+}
+
+// handleReinstallLoader re-downloads inst's loader for its already-set
+// mc_version, overwriting server.jar -- FR-4's "구동기 버전 교체" scoped down
+// to the only variant that's actually safe to automate: staying on the exact
+// same loader and Minecraft version, either picking up whatever build the
+// loader's distribution point currently considers newest (e.g. a bugfix
+// release) or, for loaders with a genuine per-version build concept
+// (BuildLister), pinning one specific build. There's no endpoint to switch
+// to a different loader or Minecraft version at all -- same as there's never
+// been one to edit inst.Loader/inst.MCVersion after creation -- since that
+// risks breaking world/plugin compatibility in ways CraftDeck can't safely
+// automate.
+//
+// Only works for a loader CraftDeck has an adapter for; a custom/manually-
+// uploaded loader (FR-3) has no adapter to re-download from at all -- the
+// operator uploads a new jar directly via handleUploadServerJar instead,
+// which already can't touch inst.Loader/inst.MCVersion either.
+func (s *Server) handleReinstallLoader(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	inst, err := s.instances.Get(ctx, r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	if inst.Kind != instance.KindServer {
+		http.Error(w, "only server instances can be reinstalled this way", http.StatusBadRequest)
+		return
+	}
+	if inst.Status != instance.StatusStopped && inst.Status != instance.StatusCrashed {
+		http.Error(w, "instance must be stopped before reinstalling its loader", http.StatusConflict)
+		return
+	}
+	adapter, ok := loader.Get(inst.Loader)
+	if !ok {
+		http.Error(w, "this instance's loader has no CraftDeck adapter to reinstall from -- upload a jar directly instead (see the 파일 tab)", http.StatusBadRequest)
+		return
+	}
+
+	var req reinstallLoaderRequest
+	// Body is optional (a bare POST with no body means "reinstall latest",
+	// the original behavior) -- only reject a body that's present but broken.
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.LoaderVersion != "" {
+		if _, ok := adapter.(loader.BuildLister); !ok {
+			http.Error(w, fmt.Sprintf("%s doesn't support pinning a specific build", inst.Loader), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := downloadLoaderJar(ctx, adapter, inst.MCVersion, req.LoaderVersion, inst.WorkDir); err != nil {
+		http.Error(w, fmt.Sprintf("download %s server jar: %v", inst.Loader, err), http.StatusInternalServerError)
+		return
+	}
+	if err := s.instances.UpdateLoaderVersion(ctx, inst.ID, req.LoaderVersion); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	chownInstanceFile(ctx, inst.ID, filepath.Join(inst.WorkDir, "server.jar"))
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 type updateInstanceRequest struct {
@@ -350,6 +643,26 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "instance stopped, but failed to remove its files: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
+
+	// plugins/backups both have a foreign key on instances(id) with no
+	// ON DELETE CASCADE, so any instance that ever had a plugin/mod
+	// installed or a backup taken would otherwise fail to delete with a
+	// foreign key constraint error -- confirmed on real hardware.
+	if err := s.plugins.DeleteByInstance(ctx, id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.backups.DeleteByInstance(ctx, id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Same FK issue for port_mappings.instance_id -- an independently-
+	// exposed server that was running (and so had a game-port mapping via
+	// ReconcileGamePorts) would otherwise fail to delete the same way.
+	if err := s.removeGamePortMapping(ctx, id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	if err := s.instances.Delete(ctx, id); err != nil {
@@ -446,6 +759,13 @@ func (s *Server) startInstanceCore(ctx context.Context, inst *instance.Instance)
 			return err
 		}
 	}
+	// FR-21/22/25: bring this instance's game-port forwarding rule in sync
+	// with the fact that it's now (about to be) running -- a soft failure
+	// here (e.g. the router's briefly unreachable) shouldn't block the
+	// instance from actually starting.
+	if err := s.ReconcileGamePorts(ctx); err != nil {
+		log.Printf("reconcile game ports after starting %s: %v", inst.ID, err)
+	}
 	return nil
 }
 
@@ -493,7 +813,16 @@ func (s *Server) stopInstanceCore(ctx context.Context, inst *instance.Instance) 
 	if active, _ := s.supervisor.IsActive(ctx, inst.ID); active {
 		status = instance.StatusRunning
 	}
-	return s.instances.UpdateStatus(ctx, inst.ID, status)
+	if err := s.instances.UpdateStatus(ctx, inst.ID, status); err != nil {
+		return err
+	}
+	// FR-21/22/25: close this instance's game-port forwarding rule now that
+	// it's (about to be) stopped -- soft failure only, same reasoning as
+	// startInstanceCore's call.
+	if err := s.ReconcileGamePorts(ctx); err != nil {
+		log.Printf("reconcile game ports after stopping %s: %v", inst.ID, err)
+	}
+	return nil
 }
 
 // tryGracefulStop sends "stop" over the managed RCON connection and waits
@@ -624,4 +953,28 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// jarMagicBytes is the ZIP local-file-header signature every real .jar (a
+// ZIP archive under the hood) starts with. FR-40 requires validating an
+// uploaded plugin/mod/loader jar "before running it" -- an extension check
+// alone (see handleUploadPlugin/handleUploadServerJar) only looks at the
+// filename an attacker fully controls, so this actually looks at the
+// content instead.
+var jarMagicBytes = [4]byte{0x50, 0x4B, 0x03, 0x04}
+
+// requireJarMagicBytes peeks the first 4 bytes of an uploaded file and
+// rejects it if they don't match jarMagicBytes, without consuming the
+// stream for whatever copies it next -- the peeked bytes are replayed via
+// the returned io.Reader.
+func requireJarMagicBytes(file io.Reader) (io.Reader, error) {
+	var peek [4]byte
+	n, err := io.ReadFull(file, peek[:])
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, fmt.Errorf("read file header: %w", err)
+	}
+	if n < len(peek) || peek != jarMagicBytes {
+		return nil, fmt.Errorf("file content doesn't look like a valid .jar (missing ZIP signature)")
+	}
+	return io.MultiReader(bytes.NewReader(peek[:]), file), nil
 }

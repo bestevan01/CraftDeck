@@ -1,7 +1,7 @@
 // Package loader downloads Minecraft server jars from each loader's
-// official distribution point (requirements.md FR-1, FR-2). Vanilla and
-// Paper adapters are implemented so far; Purpur/Fabric/Forge/Velocity/
-// BungeeCord adapters follow the same Adapter interface.
+// official distribution point (requirements.md FR-1, FR-2). Vanilla, Paper,
+// Purpur, Folia, and Velocity adapters are implemented so far; Fabric/Forge
+// adapters follow the same Adapter interface.
 package loader
 
 import (
@@ -19,14 +19,49 @@ import (
 // writes it to destDir/server.jar.
 type Adapter interface {
 	// Download places the server jar at destDir/server.jar, returning its
-	// path. mcVersion is the Minecraft version string (e.g. "1.21").
+	// path. mcVersion is the Minecraft version string (e.g. "1.21"). Always
+	// resolves to whatever build the distribution point currently considers
+	// newest for that version.
 	Download(ctx context.Context, mcVersion string, destDir string) (jarPath string, err error)
 }
 
+// BuildInfo describes one downloadable build of a specific Minecraft
+// version. ID is opaque and adapter-specific (a build number for Paper-
+// family loaders, a full version string for NeoForge) -- pass it straight
+// back to DownloadBuild to select it.
+type BuildInfo struct {
+	ID      string `json:"id"`
+	Channel string `json:"channel,omitempty"` // "STABLE"/"BETA"/"ALPHA", "RECOMMENDED", etc. -- empty if the adapter has no channel concept
+	Time    string `json:"time,omitempty"`    // RFC3339, empty if unknown
+}
+
+// BuildLister is implemented by adapters whose distribution API exposes
+// more than one meaningfully distinct build per exact Minecraft version --
+// letting the operator pin a specific one instead of always getting
+// whatever Download resolves to (FR-4, restricted to "same loader, same
+// Minecraft version, different build" -- see handleReinstallLoader).
+// Vanilla (exactly one build per version), Pufferfish (a Jenkins job's
+// builds roll the whole minor line forward rather than iterating within
+// one fixed version), and Fabric ("build" is really a loader+installer
+// version pair, not a single number) don't implement this.
+type BuildLister interface {
+	// ListBuilds returns mcVersion's builds newest-first.
+	ListBuilds(ctx context.Context, mcVersion string) ([]BuildInfo, error)
+	// DownloadBuild is Download, pinned to one specific BuildInfo.ID
+	// instead of resolving to the newest.
+	DownloadBuild(ctx context.Context, mcVersion, buildID, destDir string) (jarPath string, err error)
+}
+
 var registry = map[string]Adapter{
-	"vanilla":  VanillaAdapter{},
-	"paper":    PaperAdapter{},
-	"velocity": VelocityAdapter{},
+	"vanilla":    VanillaAdapter{},
+	"paper":      PaperAdapter{},
+	"purpur":     PurpurAdapter{},
+	"folia":      FoliaAdapter{},
+	"pufferfish": PufferfishAdapter{},
+	"leaf":       LeafAdapter{},
+	"fabric":     FabricAdapter{},
+	"neoforge":   NeoForgeAdapter{},
+	"velocity":   VelocityAdapter{},
 }
 
 func Get(loaderName string) (Adapter, bool) {
