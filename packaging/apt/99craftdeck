@@ -1,0 +1,10 @@
+// requirements.md FR-45: wires up /usr/share/craftdeck/apt-hook so a
+// package upgrade/removal that could disrupt an already-running Minecraft
+// instance (its Java runtime, glibc, systemd) stops it gracefully first and
+// restarts it once the apt transaction is done, instead of letting it get
+// killed out from under a still-running world. See that script's own
+// comment for why only Pre-Install-Pkgs (not Pre-Invoke) gets told which
+// packages are actually involved.
+DPkg::Pre-Install-Pkgs {"/usr/share/craftdeck/apt-hook pre";};
+DPkg::Tools::Options::"/usr/share/craftdeck/apt-hook pre"::Version "2";
+DPkg::Post-Invoke {"/usr/share/craftdeck/apt-hook post";};

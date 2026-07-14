@@ -1,0 +1,74 @@
+#!/bin/sh
+# apt-hook: requirements.md FR-45 -- an `apt upgrade` (or any apt
+# install/remove) that touches a package related to what actually runs a
+# Minecraft server process (its Java runtime, glibc, systemd/pid1) can
+# restart or kill those processes out from under it without saving the
+# world first. Rather than treating every apt transaction as a reason to
+# interrupt gameplay, this only stops/restarts craftdeck-managed instances
+# when the transaction actually includes a package matching
+# RELEVANT_PATTERN below -- wired up via /etc/apt/apt.conf.d/99craftdeck's
+# DPkg::Pre-Install-Pkgs (fires before dpkg unpacks anything, and is the
+# one hook that's told which packages are involved -- plain
+# DPkg::Pre-Invoke/Post-Invoke commands aren't) and DPkg::Post-Invoke
+# (fires once the whole transaction is done, unconditionally -- state from
+# the "pre" run tells it what to restart, if anything).
+#
+# Deliberately doesn't try to cover a later manual `reboot` after a kernel
+# upgrade -- that's a different problem (would need a
+# /lib/systemd/system-shutdown/ hook) than "a live apt transaction
+# disrupted a running process," which is what FR-45 actually describes.
+set -e
+
+STATE_DIR=/run/craftdeck
+STATE_FILE="$STATE_DIR/apt-hook-stopped-instances"
+
+# Package name patterns whose upgrade/removal could plausibly restart or
+# kill an already-running craftdeck-instance-*.service (the actual Java
+# process powering a Minecraft server) -- kept narrow on purpose so a
+# routine `apt install curl` doesn't interrupt anyone's game.
+RELEVANT_PATTERN='^(temurin-|openjdk-|systemd|libc6|libssl|libcrypt)'
+
+instance_units() {
+	systemctl list-units --type=service --state=running --no-legend 'craftdeck-instance-*' 2>/dev/null | awk '{print $1}'
+}
+
+case "$1" in
+pre)
+	# DPkg::Pre-Install-Pkgs (version 2) feeds one line per package in this
+	# transaction on stdin; the package name is always the first
+	# whitespace-separated field regardless of the exact version's full
+	# line format.
+	relevant=0
+	while IFS= read -r line; do
+		pkg=$(printf '%s' "$line" | awk '{print $1}')
+		if printf '%s' "$pkg" | grep -qE "$RELEVANT_PATTERN"; then
+			relevant=1
+		fi
+	done
+	if [ "$relevant" -eq 0 ]; then
+		exit 0
+	fi
+
+	running=$(instance_units)
+	if [ -z "$running" ]; then
+		exit 0
+	fi
+
+	mkdir -p "$STATE_DIR"
+	printf '%s\n' "$running" > "$STATE_FILE"
+	echo "craftdeck: stopping running Minecraft instances before apt upgrades a related package (FR-45)..." >&2
+	for unit in $running; do
+		systemctl stop "$unit" || true
+	done
+	;;
+post)
+	[ -f "$STATE_FILE" ] || exit 0
+	echo "craftdeck: restarting Minecraft instances stopped for the apt transaction..." >&2
+	while IFS= read -r unit; do
+		[ -n "$unit" ] && (systemctl start "$unit" || true)
+	done < "$STATE_FILE"
+	rm -f "$STATE_FILE"
+	;;
+esac
+
+exit 0

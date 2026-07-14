@@ -26,6 +26,18 @@ contents:
     dst: /usr/share/keyrings/adoptium.gpg
     file_info:
       mode: 0644
+  - src: systemd/journald-craftdeck.conf
+    dst: /etc/systemd/journald.conf.d/craftdeck.conf
+    file_info:
+      mode: 0644
+  - src: scripts/apt-hook
+    dst: /usr/share/craftdeck/apt-hook
+    file_info:
+      mode: 0755
+  - src: apt/99craftdeck
+    dst: /etc/apt/apt.conf.d/99craftdeck
+    file_info:
+      mode: 0644
 
 scripts:
   postinstall: scripts/postinst

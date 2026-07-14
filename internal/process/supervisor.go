@@ -56,6 +56,19 @@ func (s *Supervisor) Start(ctx context.Context, spec StartSpec) error {
 		"--property=WorkingDirectory=" + spec.WorkDir,
 		"--property=MemorySwapMax=0",
 		"--property=Restart=no",
+		// requirements.md FR-45: systemd already sends SIGTERM (triggering
+		// Minecraft's own save-all-then-exit shutdown hook) to every running
+		// unit during a normal `systemctl stop` *and* during a full system
+		// reboot/shutdown -- no separate hook is needed for the "operator
+		// manually reboots" case the apt hook (see packaging/scripts/
+		// apt-hook) deliberately left out of scope, since that path was
+		// never actually about apt at all. The real gap was the default
+		// stop timeout (90s) being too short for a slow SD-card save on a
+		// Pi to finish before systemd gives up and sends SIGKILL instead,
+		// risking a corrupted world file mid-write. 5 minutes is generous
+		// enough for that while still eventually forcing a stop if the
+		// process is genuinely hung, so a reboot doesn't wait forever.
+		"--property=TimeoutStopSec=300",
 		// Automatically unload the unit as soon as it stops, whether it
 		// exits cleanly or via signal/failure, so it never lingers in
 		// "loaded (failed)" state and blocks a future restart under the

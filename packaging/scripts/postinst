@@ -37,4 +37,9 @@ fi
 systemctl daemon-reload
 systemctl enable --now craftdeck.service
 
+# 5. Apply the console log retention/rotation policy (FR-16,
+#    /etc/systemd/journald.conf.d/craftdeck.conf) immediately -- journald
+#    only picks up config changes on restart, not on next log write.
+systemctl restart systemd-journald
+
 exit 0
