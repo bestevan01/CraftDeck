@@ -6,14 +6,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"craftdeck/internal/ddns"
+	"craftdeck/internal/dns"
 	"craftdeck/internal/instance"
 	"craftdeck/internal/loader"
+	"craftdeck/internal/modrinth"
+	"craftdeck/internal/network"
 	"craftdeck/internal/process"
+	"craftdeck/internal/secrets"
 
 	"github.com/google/uuid"
 )
@@ -27,10 +33,16 @@ const proxyMemoryMaxMB = 1024
 
 // ensureProxyInstance returns CraftDeck's singleton Velocity proxy,
 // creating and provisioning one (newest stable Velocity version, lowest
-// free port from 25577) the first time it's needed. There is only ever one
-// -- servers default to sitting behind it (see handleCreateInstance)
-// instead of being independently exposed, so it has to always exist rather
-// than being something the operator creates and configures by hand.
+// free port starting from 25565 -- Minecraft's own standard port, so a
+// player who just types the bare IP/domain with no port suffix reaches the
+// proxy the same way they'd reach any single vanilla server) the first
+// time it's needed. There is only ever one -- servers default to sitting
+// behind it (see handleCreateInstance) instead of being independently
+// exposed, so it has to always exist rather than being something the
+// operator creates and configures by hand. Backend servers themselves
+// start their own port search one above this range (see
+// nextFreeGamePort(ctx, 25566) in handlers_instance.go) so they never
+// collide with the proxy's own port.
 func (s *Server) ensureProxyInstance(ctx context.Context) (*instance.Instance, error) {
 	list, err := s.instances.List(ctx)
 	if err != nil {
@@ -50,15 +62,12 @@ func (s *Server) ensureProxyInstance(ctx context.Context) (*instance.Instance, e
 		}
 	}
 
-	versions, err := loader.FetchVelocityVersions(ctx)
+	latestVersion, err := loader.FetchLatestBuildableVelocityVersion(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch velocity versions: %w", err)
 	}
-	if len(versions) == 0 {
-		return nil, fmt.Errorf("no velocity versions available")
-	}
 
-	port := 25577
+	port := 25565
 	for {
 		inUse, err := s.gamePortInUse(ctx, port, "")
 		if err != nil {
@@ -76,7 +85,7 @@ func (s *Server) ensureProxyInstance(ctx context.Context) (*instance.Instance, e
 		Name:      "Velocity 프록시",
 		Kind:      instance.KindProxy,
 		Loader:    "velocity",
-		MCVersion: versions[0],
+		MCVersion: latestVersion,
 		// Velocity 3.x requires Java 17+; 21 is what CraftDeck already
 		// installs and uses as its own modern default elsewhere.
 		JavaMajor:   21,
@@ -116,7 +125,10 @@ func (s *Server) EnsureProxyRunning(ctx context.Context) error {
 // addServerToProxy registers server as a backend of the singleton proxy
 // (creating the proxy first if it doesn't exist yet), appended after any
 // existing backends. Called automatically when a Paper server is created
-// without explicitly opting out (see handleCreateInstance).
+// without explicitly opting out (see handleCreateInstance), and manually
+// via handleRegisterBehindProxy. A no-op (but not an error) if server is
+// already registered, so the manual endpoint stays safe to call more than
+// once (e.g. retried after an unrelated failure).
 func (s *Server) addServerToProxy(ctx context.Context, server *instance.Instance) error {
 	proxy, err := s.ensureProxyInstance(ctx)
 	if err != nil {
@@ -125,6 +137,11 @@ func (s *Server) addServerToProxy(ctx context.Context, server *instance.Instance
 	existing, err := s.instances.ListProxyBackends(ctx, proxy.ID)
 	if err != nil {
 		return err
+	}
+	for _, b := range existing {
+		if b.BackendInstanceID == server.ID {
+			return nil
+		}
 	}
 	backends := append(existing, &instance.ProxyBackend{
 		ProxyID:           proxy.ID,
@@ -228,7 +245,99 @@ func (s *Server) setServerSubdomain(ctx context.Context, serverID, forcedHost st
 	if !found {
 		return fmt.Errorf("server is not registered behind the proxy")
 	}
-	return s.applyProxyBackends(ctx, proxy, backends)
+	if err := s.applyProxyBackends(ctx, proxy, backends); err != nil {
+		return err
+	}
+	// FR-28: the whole point of assigning a forced-host subdomain is to
+	// actually be able to connect to it, so create/update its A record right
+	// away instead of waiting for SyncMainDomainDNS's next periodic pass
+	// (FR-30, see internal/ddns.Manager's reconcile loop). Best-effort: a
+	// Cloudflare hiccup here shouldn't undo the subdomain assignment that
+	// already succeeded above, so this only logs.
+	if err := s.SyncMainDomainDNS(ctx); err != nil {
+		log.Printf("set subdomain: sync main-domain DNS records: %v", err)
+	}
+	return nil
+}
+
+// SyncMainDomainDNS implements FR-28/30 for the owned-main-domain path:
+// for every server currently assigned a forced-host subdomain (see
+// setServerSubdomain), make sure Cloudflare's A record for that subdomain
+// actually points at the router's current public IP. A no-op if no
+// main_domain is registered (nothing to sync) or no proxy exists yet (no
+// forced-host subdomain could have been assigned). Called synchronously
+// right after an operator assigns/changes a subdomain (instant feedback,
+// same reasoning as the free-subdomain path's immediate Reconcile call),
+// and periodically by internal/ddns.Manager's reconcile loop so a WAN IP
+// change eventually gets picked up too (FR-30) without the operator having
+// to touch anything.
+func (s *Server) SyncMainDomainDNS(ctx context.Context) error {
+	config, err := s.domains.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if config == nil || config.Kind != ddns.KindMainDomain || config.ZoneID == "" {
+		return nil
+	}
+
+	proxy, err := s.findProxy(ctx)
+	if err != nil || proxy == nil {
+		return err
+	}
+	backends, err := s.instances.ListProxyBackends(ctx, proxy.ID)
+	if err != nil {
+		return err
+	}
+	hasForcedHost := false
+	for _, b := range backends {
+		if b.ForcedHost != "" {
+			hasForcedHost = true
+			break
+		}
+	}
+	if !hasForcedHost {
+		return nil
+	}
+
+	token, err := secrets.Decrypt(s.masterKey, config.TokenEncrypted)
+	if err != nil {
+		return fmt.Errorf("decrypt cloudflare token: %w", err)
+	}
+	publicIP, err := network.FetchPublicIP(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch public ip: %w", err)
+	}
+	// Best-effort: most home connections have no public IPv6 at all, so a
+	// failure here just means "skip AAAA", not "abort the whole sync" (see
+	// FetchPublicIPv6's doc comment).
+	publicIPv6, ipv6Available := "", false
+	if ip, err := network.FetchPublicIPv6(ctx); err == nil {
+		publicIPv6, ipv6Available = ip, true
+	}
+
+	seen := map[string]bool{} // several backends can share one forced host (see writeVelocityConfig)
+	for _, b := range backends {
+		if b.ForcedHost == "" || seen[b.ForcedHost] {
+			continue
+		}
+		seen[b.ForcedHost] = true
+		if err := dns.UpsertARecord(ctx, token, config.ZoneID, b.ForcedHost, publicIP); err != nil {
+			log.Printf("sync main-domain DNS: upsert A record for %s: %v (continuing with the rest)", b.ForcedHost, err)
+		}
+		if ipv6Available {
+			if err := dns.UpsertAAAARecord(ctx, token, config.ZoneID, b.ForcedHost, publicIPv6); err != nil {
+				log.Printf("sync main-domain DNS: upsert AAAA record for %s: %v (continuing with the rest)", b.ForcedHost, err)
+			}
+		}
+		// FR-29: every forced-host subdomain routes through this same
+		// singleton proxy, so the SRV target port is always the proxy's own
+		// game_port, not something per-server (see UpsertSRVRecord's doc
+		// comment).
+		if err := dns.UpsertSRVRecord(ctx, token, config.ZoneID, b.ForcedHost, proxy.GamePort); err != nil {
+			log.Printf("sync main-domain DNS: upsert SRV record for %s: %v (continuing with the rest)", b.ForcedHost, err)
+		}
+	}
+	return nil
 }
 
 // forwardingSecret ensures the singleton proxy exists (creating it if this
@@ -351,13 +460,41 @@ show-plugins = false
 `
 
 func writeVelocityConfig(workDir string, listenPort int, backends []proxyBackendEntry) error {
-	var servers, try, forcedHosts strings.Builder
+	var servers, try strings.Builder
+	// Group backends sharing the same ForcedHost into one ordered list
+	// instead of one "host = [name]" line per backend -- a second backend
+	// on the same subdomain would otherwise produce a duplicate TOML key
+	// (broken config). Grouping them instead gives that subdomain its own
+	// priority-ordered fallback list, using exactly the same "try the next
+	// one down if this one's unreachable" mechanism Velocity already
+	// applies to the top-level try list (requirements.md FR-1d) -- no
+	// separate health-check poller needed: a new connection attempt (or a
+	// reconnect after failover-on-unexpected-server-disconnect kicks in)
+	// re-evaluates the list fresh every time, so it naturally prefers a
+	// recovered higher-priority server again on its own. backends is
+	// already priority-ordered (see ListProxyBackends), so the order
+	// entries are appended in below is preserved within each group.
+	forcedHostOrder := make([]string, 0)
+	forcedHostServers := make(map[string][]string)
 	for _, b := range backends {
 		fmt.Fprintf(&servers, "%q = %q\n", b.Name, b.Address)
 		fmt.Fprintf(&try, "    %q,\n", b.Name)
 		if b.ForcedHost != "" {
-			fmt.Fprintf(&forcedHosts, "%q = [%q]\n", b.ForcedHost, b.Name)
+			if _, seen := forcedHostServers[b.ForcedHost]; !seen {
+				forcedHostOrder = append(forcedHostOrder, b.ForcedHost)
+			}
+			forcedHostServers[b.ForcedHost] = append(forcedHostServers[b.ForcedHost], b.Name)
 		}
+	}
+
+	var forcedHosts strings.Builder
+	for _, host := range forcedHostOrder {
+		names := forcedHostServers[host]
+		quoted := make([]string, len(names))
+		for i, name := range names {
+			quoted[i] = fmt.Sprintf("%q", name)
+		}
+		fmt.Fprintf(&forcedHosts, "%q = [%s]\n", host, strings.Join(quoted, ", "))
 	}
 
 	content := fmt.Sprintf(velocityConfigTemplate,
@@ -365,25 +502,68 @@ func writeVelocityConfig(workDir string, listenPort int, backends []proxyBackend
 	return os.WriteFile(filepath.Join(workDir, "velocity.toml"), []byte(content), 0o640)
 }
 
+// supportsVelocityForwarding reports whether loaderName's server software
+// can be made to trust Velocity's "modern" player-info forwarding (the only
+// mode CraftDeck wires up, chosen over "legacy" because it's far harder to
+// spoof). Purpur, Folia, Pufferfish, and Leaf are all Paper forks that
+// carry the same proxies.velocity config forward unchanged, so they
+// qualify exactly like Paper itself. Fabric/NeoForge have no built-in
+// equivalent, but installFabricProxyMods/installNeoForgeProxyMod (see
+// handlers_instance.go) install a companion forwarding mod (FabricProxy-Lite
+// +Fabric API, or NeoForged Velocity Support) and pre-seed its config/a
+// forwarding.secret file with the same secret, so they qualify too --
+// everything else (Vanilla, and Forge until an equivalent mod is wired up)
+// doesn't. This governs the *automatic* default at creation time
+// (handleCreateInstance) -- a manually-uploaded custom loader (FR-3) can
+// still be added to the proxy afterward through an explicit operator
+// action; see handleSetProxyBackends's relaxed check.
+//
+// This is necessary but not sufficient for NeoForge specifically -- see
+// supportsVelocityForwardingForVersion, which callers that know the actual
+// Minecraft version should use instead.
+func supportsVelocityForwarding(loaderName string) bool {
+	switch strings.ToLower(loaderName) {
+	case "paper", "purpur", "folia", "pufferfish", "leaf", "fabric", "neoforge":
+		return true
+	default:
+		return false
+	}
+}
+
+// supportsVelocityForwardingForVersion refines supportsVelocityForwarding
+// for loaders whose forwarding mod isn't published for every Minecraft
+// version the loader itself supports -- currently just NeoForge, whose
+// NeoForged Velocity Support mod (see installNeoForgeProxyMod) only has
+// builds for a handful of versions on Modrinth so far. A NeoForge instance
+// on any other version falls back to independent exposure, same as
+// Vanilla, rather than failing creation outright over something the
+// operator can't fix from CraftDeck's side.
+func supportsVelocityForwardingForVersion(ctx context.Context, loaderName, mcVersion string) bool {
+	if !supportsVelocityForwarding(loaderName) {
+		return false
+	}
+	if strings.EqualFold(loaderName, "neoforge") {
+		_, err := modrinth.BestVersion(ctx, "neoforged-velocity-support", "neoforge", mcVersion)
+		return err == nil
+	}
+	return true
+}
+
 // resolveProxyBackendEntries turns DB-level backend assignments into the
-// (name, address) pairs velocity.toml needs, rejecting any non-Paper
-// backend: Velocity's "modern" player info forwarding (the only mode
-// CraftDeck wires up, chosen over "legacy" because it's far harder to
-// spoof) requires the backend server to trust a shared secret via Paper's
-// own velocity-support config -- something only Paper (not vanilla)
-// exposes. See requirements.md FR-1c.
+// (name, address) pairs velocity.toml needs. It doesn't gatekeep by loader
+// here -- supportsVelocityForwardingForVersion already decides *whether a
+// backend gets added automatically* at creation time (handleCreateInstance),
+// so by the time an entry reaches this function it's either already known
+// good, or the operator added it deliberately through the manual
+// register/unregister endpoints below (a custom/unlisted loader, FR-3,
+// that the operator has confirmed themselves trusts the forwarding secret
+// -- CraftDeck has no way to verify that itself for an arbitrary jar).
 func resolveProxyBackendEntries(ctx context.Context, s *Server, backends []*instance.ProxyBackend) ([]proxyBackendEntry, error) {
 	entries := make([]proxyBackendEntry, 0, len(backends))
 	for _, b := range backends {
 		backend, err := s.instances.Get(ctx, b.BackendInstanceID)
 		if err != nil {
 			return nil, fmt.Errorf("backend instance %s not found", b.BackendInstanceID)
-		}
-		if !strings.EqualFold(backend.Loader, "paper") {
-			return nil, fmt.Errorf(
-				"'%s'는 %s 구동기라 Velocity 뒤에 놓을 수 없습니다 (모던 포워딩은 Paper만 지원합니다)",
-				backend.Name, backend.Loader,
-			)
 		}
 		entries = append(entries, proxyBackendEntry{
 			Name:       backend.Name,
@@ -517,6 +697,14 @@ func (s *Server) handleGetForwardingSecret(w http.ResponseWriter, r *http.Reques
 type serverSubdomainResponse struct {
 	Registered bool   `json:"registered"`
 	ForcedHost string `json:"forced_host"`
+	// ProxyPort is the singleton proxy's own game_port, included whenever
+	// Registered is true -- a server sitting behind the proxy is bound to
+	// 127.0.0.1 only, so *this* is the port a player actually connects to
+	// reach it (directly, or via ForcedHost), not the server's own
+	// game_port. Lets the instance detail page's "접속 주소" card show a
+	// real, working address for a proxied server too (see
+	// web/src/routes/instances/[id]/+page.svelte).
+	ProxyPort int `json:"proxy_port,omitempty"`
 }
 
 // handleGetServerSubdomain returns the subdomain a server is reachable
@@ -525,13 +713,20 @@ type serverSubdomainResponse struct {
 // default design), so subdomain management lives on each server's own
 // console instead of a "backends" tab on a proxy instance page.
 func (s *Server) handleGetServerSubdomain(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id := r.PathValue("id")
-	forcedHost, registered, err := s.serverSubdomain(r.Context(), id)
+	forcedHost, registered, err := s.serverSubdomain(ctx, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, serverSubdomainResponse{Registered: registered, ForcedHost: forcedHost})
+	resp := serverSubdomainResponse{Registered: registered, ForcedHost: forcedHost}
+	if registered {
+		if proxy, err := s.findProxy(ctx); err == nil && proxy != nil {
+			resp.ProxyPort = proxy.GamePort
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type setServerSubdomainRequest struct {
@@ -542,6 +737,7 @@ type setServerSubdomainRequest struct {
 // sitting behind the proxy (see addServerToProxy -- every Paper server not
 // explicitly opted out gets registered there at creation).
 func (s *Server) handleSetServerSubdomain(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id := r.PathValue("id")
 	var req setServerSubdomainRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -552,14 +748,542 @@ func (s *Server) handleSetServerSubdomain(w http.ResponseWriter, r *http.Request
 		http.Error(w, "forced_host must not be empty", http.StatusBadRequest)
 		return
 	}
-	if err := s.setServerSubdomain(r.Context(), id, req.ForcedHost); err != nil {
+	if err := s.setServerSubdomain(ctx, id, req.ForcedHost); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	forcedHost, registered, err := s.serverSubdomain(r.Context(), id)
+	forcedHost, registered, err := s.serverSubdomain(ctx, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, serverSubdomainResponse{Registered: registered, ForcedHost: forcedHost})
+	resp := serverSubdomainResponse{Registered: registered, ForcedHost: forcedHost}
+	if registered {
+		if proxy, err := s.findProxy(ctx); err == nil && proxy != nil {
+			resp.ProxyPort = proxy.GamePort
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type proxyStatusResponse struct {
+	Exists          bool   `json:"exists"`
+	CurrentVersion  string `json:"current_version,omitempty"`
+	LatestVersion   string `json:"latest_version,omitempty"`
+	UpdateAvailable bool   `json:"update_available"`
+}
+
+// handleGetProxyStatus reports the singleton proxy's current Velocity
+// version against the newest one available, so the UI can surface an
+// "update available" affordance. Needed because ensureProxyInstance only
+// ever picks a version once, at creation -- it never re-checks afterward,
+// so the proxy can silently fall behind new Velocity releases (e.g. the
+// build that first added support for Minecraft's 26.x protocol).
+func (s *Server) handleGetProxyStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	proxy, err := s.findProxy(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if proxy == nil {
+		writeJSON(w, http.StatusOK, proxyStatusResponse{Exists: false})
+		return
+	}
+
+	latest, err := loader.FetchLatestBuildableVelocityVersion(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, proxyStatusResponse{
+		Exists:          true,
+		CurrentVersion:  proxy.MCVersion,
+		LatestVersion:   latest,
+		UpdateAvailable: latest != "" && latest != proxy.MCVersion,
+	})
+}
+
+type upgradeProxyResponse struct {
+	Upgraded bool   `json:"upgraded"`
+	Version  string `json:"version"`
+}
+
+// handleUpgradeProxy replaces the singleton proxy's jar with the newest
+// available Velocity build and restarts it to pick up support for newer
+// Minecraft protocol versions (see handleGetProxyStatus's doc comment).
+// This is a brief connectivity outage for every backend server sitting
+// behind the proxy while it restarts.
+func (s *Server) handleUpgradeProxy(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	proxy, err := s.findProxy(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if proxy == nil {
+		http.Error(w, "proxy does not exist yet", http.StatusNotFound)
+		return
+	}
+
+	latest, err := loader.FetchLatestBuildableVelocityVersion(ctx)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("fetch velocity versions: %v", err), http.StatusBadGateway)
+		return
+	}
+	if latest == proxy.MCVersion {
+		writeJSON(w, http.StatusOK, upgradeProxyResponse{Upgraded: false, Version: latest})
+		return
+	}
+
+	if err := s.stopInstanceCore(ctx, proxy); err != nil {
+		http.Error(w, fmt.Sprintf("stop proxy: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	adapter, _ := loader.Get("velocity") // always registered -- see loader.go's registry
+	if _, err := adapter.Download(ctx, latest, proxy.WorkDir); err != nil {
+		http.Error(w, fmt.Sprintf("download velocity %s: %v", latest, err), http.StatusInternalServerError)
+		return
+	}
+	username, err := process.EnsureInstanceUser(ctx, proxy.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := process.ChownRecursive(ctx, proxy.WorkDir, username); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.instances.UpdateVersion(ctx, proxy.ID, latest); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	proxy.MCVersion = latest
+
+	if err := s.startInstanceCore(ctx, proxy); err != nil {
+		http.Error(w, fmt.Sprintf("restart proxy after upgrade (jar was already replaced -- retry starting it manually): %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, upgradeProxyResponse{Upgraded: true, Version: latest})
+}
+
+// patchServerProperties reads workDir/server.properties (if it exists),
+// overwrites/inserts the given key=value pairs, and writes it back --
+// preserving every other line and its original order, unlike
+// provisionServerFiles' server.properties which is only ever written fresh
+// at creation. Used by handleRegisterBehindProxy/handleUnregisterFromProxy
+// to flip server-ip/online-mode without touching anything else the
+// operator (or the server itself) has configured since.
+func patchServerProperties(workDir string, updates map[string]string) error {
+	path := filepath.Join(workDir, "server.properties")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	remaining := make(map[string]string, len(updates))
+	for k, v := range updates {
+		remaining[k] = v
+	}
+
+	var lines []string
+	if len(existing) > 0 {
+		lines = strings.Split(strings.TrimRight(string(existing), "\n"), "\n")
+	}
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		key := strings.SplitN(trimmed, "=", 2)[0]
+		if newValue, ok := remaining[key]; ok {
+			lines[i] = key + "=" + newValue
+			delete(remaining, key)
+		}
+	}
+	for k, v := range remaining { // wasn't already present -- append it
+		lines = append(lines, k+"="+v)
+	}
+
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o640)
+}
+
+type registerProxyResponse struct {
+	ForwardingSecret string `json:"forwarding_secret"`
+}
+
+// handleRegisterBehindProxy manually adds an already-independently-exposed
+// server instance to the singleton proxy's backend list -- the escape
+// hatch for a custom/manually-uploaded loader (FR-3) that
+// supportsVelocityForwardingForVersion doesn't recognize, so it never got
+// added automatically at creation. Registering here doesn't verify the
+// server software actually understands Velocity's forwarding secret --
+// CraftDeck has no general way to check that for an arbitrary jar -- so
+// the operator is responsible for having configured that trust themselves
+// (e.g. via the file manager, editing whatever config their loader needs)
+// before this is actually useful; the response includes the secret so they
+// can go do exactly that.
+func (s *Server) handleRegisterBehindProxy(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := r.PathValue("id")
+	inst, err := s.instances.Get(ctx, id)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	if inst.Kind != instance.KindServer {
+		http.Error(w, "only server instances can be registered behind the proxy", http.StatusBadRequest)
+		return
+	}
+	if inst.Status != instance.StatusStopped && inst.Status != instance.StatusCrashed {
+		http.Error(w, "instance must be stopped before changing its proxy registration", http.StatusConflict)
+		return
+	}
+
+	secret, err := s.registerServerBehindProxyCore(ctx, inst)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, registerProxyResponse{ForwardingSecret: secret})
+}
+
+// handleUnregisterFromProxy reverses handleRegisterBehindProxy -- removes
+// the instance from the proxy's backend list and reopens it to direct
+// connections (server-ip cleared, online-mode back to Mojang
+// authentication).
+func (s *Server) handleUnregisterFromProxy(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := r.PathValue("id")
+	inst, err := s.instances.Get(ctx, id)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	if inst.Status != instance.StatusStopped && inst.Status != instance.StatusCrashed {
+		http.Error(w, "instance must be stopped before changing its proxy registration", http.StatusConflict)
+		return
+	}
+	if err := s.unregisterServerFromProxyCore(ctx, inst); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// registerServerBehindProxyCore does the actual work of putting server
+// behind the singleton proxy: adds it to the backend list, flips its
+// server.properties to trust modern forwarding, and (re-)enables whatever
+// loader-specific mechanism actually enforces that trust (see
+// setForwardingTrust) -- without this last step a Paper-family server
+// still has `proxies.velocity.enabled: true` sitting from before, or a
+// Fabric/NeoForge one is still missing its forwarding mod, either of which
+// break direct connections independently of the backend-list/
+// server.properties state. Shared by handleRegisterBehindProxy (manual,
+// requires the instance to already be stopped) and ReconcileProxyMode
+// (automatic, triggered by domain registration changes -- FR-1f -- which
+// doesn't require the instance to be stopped first since these file edits
+// only take effect on the server's next boot anyway, same as every other
+// property change).
+func (s *Server) registerServerBehindProxyCore(ctx context.Context, inst *instance.Instance) (forwardingSecret string, err error) {
+	secret, err := s.forwardingSecret(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare proxy: %w", err)
+	}
+	if err := s.addServerToProxy(ctx, inst); err != nil {
+		return "", err
+	}
+	if err := patchServerProperties(inst.WorkDir, map[string]string{
+		"server-ip":   "127.0.0.1",
+		"online-mode": "false",
+	}); err != nil {
+		return "", fmt.Errorf("registered behind proxy, but failed to update server.properties: %w", err)
+	}
+	if err := setForwardingTrust(ctx, inst, secret, true); err != nil {
+		return "", fmt.Errorf("registered behind proxy, but failed to enable forwarding trust: %w", err)
+	}
+	// setForwardingTrust's Fabric/NeoForge branch writes config/*.toml and
+	// forwarding.secret fresh (this instance may never have had them, e.g.
+	// one created while independently exposed) -- unlike provisionServerFiles
+	// at instance creation, nothing chowns them here otherwise, and a file
+	// newly created by this root process is unreadable by the instance's own
+	// unprivileged user. Confirmed on real hardware: FabricProxy-Lite failed
+	// to boot with a FileNotFoundException/permission-denied reading its own
+	// config/FabricProxy-Lite.toml after converting an instance from
+	// independent exposure to behind-the-proxy. Recursive chown is a no-op
+	// for files that already existed and were already owned correctly (e.g.
+	// Paper's paper-global.yml edited in place).
+	chownInstanceFile(ctx, inst.ID, inst.WorkDir)
+	return secret, nil
+}
+
+// unregisterServerFromProxyCore is registerServerBehindProxyCore's inverse
+// -- see its doc comment for why no "must be stopped" check happens here,
+// and setForwardingTrust's doc comment for why this needs to do more than
+// just patch server.properties (confirmed on real hardware: skipping this
+// left the server refusing every direct connection with "This server
+// requires you to connect with Velocity." even after conversion to
+// independent exposure, since paper-global.yml's proxies.velocity.enabled
+// was never flipped back off).
+func (s *Server) unregisterServerFromProxyCore(ctx context.Context, inst *instance.Instance) error {
+	if err := s.removeServerFromProxy(ctx, inst.ID); err != nil {
+		return err
+	}
+	return s.revertServerProxySettings(ctx, inst)
+}
+
+// revertServerProxySettings undoes just the per-server side of proxy
+// registration (server.properties, forwarding trust, ownership) without
+// touching the proxy's own backend list/restart -- the part of
+// unregisterServerFromProxyCore that's actually specific to this one
+// server. ReconcileProxyMode's teardown path (no main domain registered)
+// calls this directly instead of unregisterServerFromProxyCore for every
+// registered server: going through removeServerFromProxy there would
+// rewrite the proxy's backend list and restart it (stop+start, see
+// applyProxyBackends) once per server, and since removeProxyInstance stops
+// and deletes the whole proxy right after the loop anyway, those
+// intermediate restarts were pure churn -- confirmed on real hardware as
+// the proxy's UPnP port mapping visibly flickering off/on once per
+// registered server before finally disappearing for good.
+func (s *Server) revertServerProxySettings(ctx context.Context, inst *instance.Instance) error {
+	if err := patchServerProperties(inst.WorkDir, map[string]string{
+		"server-ip":   "",
+		"online-mode": "true",
+	}); err != nil {
+		return fmt.Errorf("unregistered from proxy, but failed to update server.properties: %w", err)
+	}
+	if err := setForwardingTrust(ctx, inst, "", false); err != nil {
+		return fmt.Errorf("unregistered from proxy, but failed to disable forwarding trust: %w", err)
+	}
+	// Defensive/symmetric with registerServerBehindProxyCore -- this branch
+	// only edits existing files in place or deletes files, so nothing should
+	// actually need re-chowning, but it's a cheap no-op if so.
+	chownInstanceFile(ctx, inst.ID, inst.WorkDir)
+	return nil
+}
+
+// setForwardingTrust (re-)enables or disables the loader-specific
+// mechanism that makes a server actually enforce/trust Velocity's modern
+// player-info forwarding -- the thing that produces "This server requires
+// you to connect with Velocity." when it's on and the connection isn't
+// actually coming through the proxy. This is separate from (and just as
+// necessary as) the backend-list membership and server.properties changes
+// register/unregister already made: those control whether the proxy
+// *routes* to this server and whether the server *binds* to the LAN, but
+// this is what makes the server itself *require* (or not) a forwarded
+// connection at all.
+//
+//   - Paper-family (paper/purpur/folia/pufferfish/leaf): flips
+//     config/paper-global.yml's proxies.velocity.enabled (see
+//     setPaperVelocityEnabled) -- a no-op if that file/block doesn't exist,
+//     which is fine for a custom/unrecognized loader an operator registered
+//     manually (FR-3) and is expected to configure trust for themselves.
+//   - Fabric: (re-)installs or removes the FabricProxy-Lite mod
+//     (installFabricProxyMods/removeModByNameSubstring) -- its mere
+//     presence is what enforces the trust requirement, unlike Paper's
+//     config toggle.
+//   - NeoForge: same idea via the neoforged-velocity-support mod.
+//   - Anything else (custom/unrecognized loaders): left untouched --
+//     CraftDeck has no general way to know what such a loader needs (same
+//     reasoning as handleRegisterBehindProxy's doc comment).
+func setForwardingTrust(ctx context.Context, inst *instance.Instance, forwardingSecret string, enable bool) error {
+	switch {
+	case strings.EqualFold(inst.Loader, "fabric"):
+		if enable {
+			return installFabricProxyMods(ctx, inst, forwardingSecret)
+		}
+		return removeModByNameSubstring(inst.WorkDir, "fabricproxy-lite")
+	case strings.EqualFold(inst.Loader, "neoforge"):
+		if enable {
+			return installNeoForgeProxyMod(ctx, inst, forwardingSecret)
+		}
+		return removeModByNameSubstring(inst.WorkDir, "neoforged-velocity-support")
+	case supportsVelocityForwarding(inst.Loader):
+		return setPaperVelocityEnabled(inst.WorkDir, enable)
+	default:
+		return nil
+	}
+}
+
+// setPaperVelocityEnabled flips config/paper-global.yml's
+// proxies.velocity.enabled key between true/false without a full YAML
+// parser (matching the project's minimal-dependency philosophy, NFR-9) --
+// finds the "velocity:" line, then the "enabled:" line nested under it by
+// indentation, and rewrites just that value in place. A server that's
+// never had this file written (never registered behind the proxy, or not
+// a loader CraftDeck configures this for) is left untouched.
+func setPaperVelocityEnabled(workDir string, enabled bool) error {
+	path := filepath.Join(workDir, "config", "paper-global.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+
+	velocityIndent := -1
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		indent := len(line) - len(trimmed)
+		if velocityIndent == -1 {
+			if strings.HasPrefix(trimmed, "velocity:") {
+				velocityIndent = indent
+			}
+			continue
+		}
+		if trimmed == "" {
+			continue
+		}
+		if indent <= velocityIndent {
+			break // left the velocity: block without finding "enabled:"
+		}
+		if strings.HasPrefix(trimmed, "enabled:") {
+			lines[i] = fmt.Sprintf("%s%s: %v", line[:indent], "enabled", enabled)
+			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o640)
+		}
+	}
+	return nil // no proxies.velocity block found -- nothing to flip
+}
+
+// removeModByNameSubstring deletes every file in workDir/mods whose
+// filename contains needle (case-insensitive) -- undoes
+// installFabricProxyMods/installNeoForgeProxyMod's install without needing
+// to re-resolve the exact Modrinth file that was originally downloaded
+// (its filename varies by version).
+func removeModByNameSubstring(workDir, needle string) error {
+	modsDir := filepath.Join(workDir, "mods")
+	entries, err := os.ReadDir(modsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	needle = strings.ToLower(needle)
+	for _, e := range entries {
+		if e.IsDir() || !strings.Contains(strings.ToLower(e.Name()), needle) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(modsDir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeProxyInstance stops and permanently deletes the singleton proxy --
+// used by ReconcileProxyMode when no owned domain is registered, since
+// keeping Velocity running (its fixed 1GB allocation, proxyMemoryMaxMB)
+// serves no purpose without real DNS to make forced-host subdomain routing
+// reachable. ensureProxyInstance recreates a fresh one on demand if an
+// owned domain is registered again later. Mirrors handleDeleteInstance's
+// cleanup ordering (stop unit -> remove system user -> delete files ->
+// clear DB rows that would otherwise foreign-key-block the instance
+// delete), minus the steps that don't apply to a proxy (no plugins,
+// backups, or proxy-backend membership of its own).
+func (s *Server) removeProxyInstance(ctx context.Context) error {
+	proxy, err := s.findProxy(ctx)
+	if err != nil || proxy == nil {
+		return err
+	}
+	_ = s.supervisor.Stop(ctx, proxy.ID) // best-effort: fine if it wasn't running
+	_ = process.RemoveInstanceUser(ctx, proxy.ID)
+	if proxy.WorkDir != "" {
+		if err := os.RemoveAll(proxy.WorkDir); err != nil {
+			return fmt.Errorf("remove proxy work dir: %w", err)
+		}
+	}
+	// proxy_backends has no ON DELETE CASCADE on proxy_id (same issue
+	// handleDeleteInstance works around for plugins/backups), so clear it
+	// first via the existing "replace with an empty list" method.
+	if err := s.instances.SetProxyBackends(ctx, proxy.ID, nil); err != nil {
+		return err
+	}
+	// Same FK issue for port_mappings.instance_id -- the proxy's own
+	// game-port mapping (see ReconcileGamePorts) must be torn down before
+	// its instance row can be deleted.
+	if err := s.removeGamePortMapping(ctx, proxy.ID); err != nil {
+		return fmt.Errorf("remove proxy's game-port mapping: %w", err)
+	}
+	return s.instances.Delete(ctx, proxy.ID)
+}
+
+// ReconcileProxyMode implements FR-1f: Velocity only makes sense with a
+// real owned domain registered (internal/ddns) -- without one, forced-host
+// subdomain routing was never actually reachable (no DNS resolves to it),
+// and a free-subdomain DDNS provider can only ever point at one server
+// anyway (FR-27), so there's nothing for a multi-server proxy to do. Called
+// whenever domain registration changes (handlers_domain.go) and once at
+// daemon startup (see cmd/craftdeckd/main.go), so the proxy's existence
+// and each server's exposure mode never drift from the registered domain
+// state:
+//   - owned domain registered: every proxy-capable server not already
+//     behind the proxy gets registered (mirrors what new servers get by
+//     default at creation -- see handleCreateInstance).
+//   - no owned domain (none registered, or only a free-subdomain one):
+//     every server currently behind the proxy is converted to independent
+//     exposure, then the proxy itself is torn down (removeProxyInstance).
+func (s *Server) ReconcileProxyMode(ctx context.Context) error {
+	hasMainDomain, err := s.domains.HasMainDomain(ctx)
+	if err != nil {
+		return err
+	}
+
+	list, err := s.instances.List(ctx)
+	if err != nil {
+		return err
+	}
+
+	if hasMainDomain {
+		for _, inst := range list {
+			if inst.Kind != instance.KindServer || !supportsVelocityForwardingForVersion(ctx, inst.Loader, inst.MCVersion) {
+				continue
+			}
+			_, registered, err := s.serverSubdomain(ctx, inst.ID)
+			if err != nil {
+				return err
+			}
+			if registered {
+				continue
+			}
+			if _, err := s.registerServerBehindProxyCore(ctx, inst); err != nil {
+				log.Printf("reconcile proxy mode: register %s behind proxy: %v (continuing with the rest)", inst.ID, err)
+			}
+		}
+	} else {
+		for _, inst := range list {
+			if inst.Kind != instance.KindServer {
+				continue
+			}
+			_, registered, err := s.serverSubdomain(ctx, inst.ID)
+			if err != nil {
+				return err
+			}
+			if !registered {
+				continue
+			}
+			// revertServerProxySettings, not unregisterServerFromProxyCore --
+			// the proxy itself is being torn down by removeProxyInstance right
+			// below (which deletes its backend rows, work dir, and mapping in
+			// one shot), so there's no point rewriting its backend list and
+			// restarting it for every server in this loop first. See
+			// revertServerProxySettings's doc comment.
+			if err := s.revertServerProxySettings(ctx, inst); err != nil {
+				log.Printf("reconcile proxy mode: unregister %s from proxy: %v (continuing with the rest)", inst.ID, err)
+			}
+		}
+		if err := s.removeProxyInstance(ctx); err != nil {
+			return err
+		}
+	}
+
+	// FR-21/22/25: a server's proxy-registration state just changed above,
+	// which flips whether it's directly reachable at all -- e.g. a server
+	// that was behind the proxy and is still running becomes independently
+	// exposed here, and (if WAN exposure is on) now needs its own game-port
+	// mapping it didn't have a moment ago.
+	return s.ReconcileGamePorts(ctx)
 }
