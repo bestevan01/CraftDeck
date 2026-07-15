@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"craftdeck/internal/swap"
 )
 
 // systemResources is the payload for GET /api/system/resources: covers both
@@ -190,4 +193,56 @@ func diskUsageMB(path string) (totalMB, usedMB int, err error) {
 		return 0, 0, err
 	}
 	return totalKB / 1024, usedKB / 1024, nil
+}
+
+// handleGetSwap reports CraftDeck's own managed swap file's status --
+// entirely independent of any RAM-based swap (e.g. Raspberry Pi OS's
+// zram-generator) the base OS may already have running (see
+// internal/swap's package doc comment).
+func (s *Server) handleGetSwap(w http.ResponseWriter, r *http.Request) {
+	info, err := swap.Status(r.Context(), s.dataDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+type setSwapRequest struct {
+	SizeMB int `json:"size_mb"`
+}
+
+// handleSetSwap creates CraftDeck's swap file (if it doesn't exist yet) or
+// replaces it with a differently-sized one (if it does). Rejects a size
+// that wouldn't leave a safety margin of free disk space rather than
+// filling the disk (see swap.Set).
+func (s *Server) handleSetSwap(w http.ResponseWriter, r *http.Request) {
+	var req setSwapRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.SizeMB <= 0 {
+		http.Error(w, "size_mb must be positive", http.StatusBadRequest)
+		return
+	}
+	if err := swap.Set(r.Context(), s.dataDir, req.SizeMB); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	info, err := swap.Status(r.Context(), s.dataDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
+// handleDeleteSwap turns off and removes CraftDeck's swap file entirely.
+func (s *Server) handleDeleteSwap(w http.ResponseWriter, r *http.Request) {
+	if err := swap.Disable(r.Context(), s.dataDir); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

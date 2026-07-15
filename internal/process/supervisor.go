@@ -24,6 +24,14 @@ type StartSpec struct {
 	JavaArgs        []string
 	CPUQuotaPercent int // 0 means "unset, no limit"
 	MemoryMaxMB     int // 0 means "unset, no limit"
+	// AllowSwap lets this instance's cgroup page out to swap instead of
+	// being OOM-killed once it exceeds physical RAM -- the caller should
+	// only set this when CraftDeck's own swap file (internal/swap) is
+	// actually enabled, so a memory allocation above physical RAM has
+	// somewhere real to go. False (the long-standing default) keeps a
+	// runaway instance from dragging the whole system into slow,
+	// heavily-swapped territory; see Start's MemorySwapMax handling.
+	AllowSwap bool
 }
 
 func unitName(instanceID string) string {
@@ -49,12 +57,25 @@ func (s *Supervisor) Start(ctx context.Context, spec StartSpec) error {
 	// Clear any such leftover state before asking for a fresh unit.
 	_ = exec.CommandContext(ctx, "systemctl", "reset-failed", unitName(spec.InstanceID)).Run()
 
+	// MemorySwapMax=0 (the default) keeps this instance's cgroup from ever
+	// paging out to swap at all -- once physical RAM allocated to it runs
+	// out, the kernel OOM-kills it outright rather than letting it slow to
+	// a crawl swapping a JVM heap. When the operator has actually turned on
+	// CraftDeck's own swap file and wants to let an instance's allocation
+	// exceed physical RAM, AllowSwap lifts this cap entirely (rather than
+	// trying to carve up a fair per-instance share of one shared swap
+	// file/device, which the kernel's own swap accounting already does
+	// naturally across whichever cgroups are actually using it).
+	memorySwapMax := "0"
+	if spec.AllowSwap {
+		memorySwapMax = "infinity"
+	}
 	args := []string{
 		"--unit=" + unitName(spec.InstanceID),
 		"--property=User=" + spec.Username,
 		"--property=Group=" + spec.Username,
 		"--property=WorkingDirectory=" + spec.WorkDir,
-		"--property=MemorySwapMax=0",
+		"--property=MemorySwapMax=" + memorySwapMax,
 		"--property=Restart=no",
 		// requirements.md FR-45: systemd already sends SIGTERM (triggering
 		// Minecraft's own save-all-then-exit shutdown hook) to every running

@@ -8,7 +8,8 @@
 		type BuildInfo,
 		type NetworkSettings,
 		type PortMapping,
-		type DomainConfig
+		type DomainConfig,
+		type SwapInfo
 	} from '$lib/api';
 	import { onDestroy, onMount } from 'svelte';
 
@@ -256,6 +257,61 @@
 		return { upnp: 'UPnP', natpmp: 'NAT-PMP', manual: '수동' }[method] ?? method;
 	}
 
+	// 가상 메모리(디스크 스왑파일) -- 라즈베리파이 OS의 zram(RAM 압축 스왑)과는
+	// 별개로 동작하는, CraftDeck 전용 디스크 기반 스왑. RAM+zram으로도 부족할
+	// 때를 대비한 추가 여유분 성격이라 커널이 항상 실제 RAM/zram을 먼저 쓰고
+	// 남을 때만 사용한다.
+	let swapInfo = $state<SwapInfo | null>(null);
+	// GB in the UI, converted to/from the API's MB at the boundary --
+	// backend (internal/swap) still stores/reports everything in MB.
+	let swapSizeInput = $state('');
+	let swapSaving = $state(false);
+	let swapError = $state('');
+
+	async function refreshSwap() {
+		try {
+			swapInfo = await api.getSwap();
+			if (!swapSizeInput && swapInfo.size_mb > 0) {
+				swapSizeInput = String(swapInfo.size_mb / 1024);
+			}
+		} catch {
+			// non-critical panel -- leave last known status as-is
+		}
+	}
+
+	async function saveSwap() {
+		const sizeGB = Number(swapSizeInput);
+		if (!Number.isFinite(sizeGB) || sizeGB <= 0) {
+			swapError = '0보다 큰 크기를 GB 단위로 입력하세요.';
+			return;
+		}
+		const sizeMB = Math.round(sizeGB * 1024);
+		swapSaving = true;
+		swapError = '';
+		try {
+			swapInfo = await api.setSwap(sizeMB);
+		} catch (err) {
+			swapError = err instanceof Error ? err.message : String(err);
+		} finally {
+			swapSaving = false;
+		}
+	}
+
+	async function disableSwap() {
+		if (!confirm('스왑파일을 완전히 끄고 삭제할까요?')) return;
+		swapSaving = true;
+		swapError = '';
+		try {
+			await api.deleteSwap();
+			swapInfo = await api.getSwap();
+			swapSizeInput = '';
+		} catch (err) {
+			swapError = err instanceof Error ? err.message : String(err);
+		} finally {
+			swapSaving = false;
+		}
+	}
+
 	function mappingOwnerLabel(mapping: PortMapping) {
 		if (!mapping.instance_id) return '웹 UI';
 		return instances.find((i) => i.id === mapping.instance_id)?.name ?? mapping.instance_id;
@@ -389,16 +445,21 @@
 		showCreateForm = true;
 	}
 
-	// Caps the create-form memory slider at the Pi's actual RAM minus the
-	// always-on Velocity proxy's fixed 1GB, same as the instance-settings
-	// slider on the instance detail page -- both read from the same
-	// /api/system/resources this page already polls for the resource-monitor
-	// panel, so no extra request is needed here.
-	let maxMemoryGB = $derived(
-		resources
-			? Math.max(1, Math.floor((resources.total_memory_mb - PROXY_RESERVED_MEMORY_MB) / 1024))
-			: 1
-	);
+	// Caps the create-form memory slider at the Pi's actual RAM, plus
+	// CraftDeck's own swap file's size if the operator has turned it on
+	// (instances only actually get to use that swap when it's on -- see
+	// AllowSwap in startInstanceCore), minus the always-on Velocity proxy's
+	// fixed 1GB reservation -- but only while the proxy actually exists AND
+	// is running; if it's torn down (FR-1f, no main domain registered) or
+	// just not running right now, that 1GB isn't reserved by anything.
+	let availableMemoryMB = $derived.by(() => {
+		if (!resources) return 1024;
+		let total = resources.total_memory_mb;
+		if (swapInfo?.enabled) total += swapInfo.size_mb;
+		if (proxyStatus?.exists && proxyStatus.running) total -= PROXY_RESERVED_MEMORY_MB;
+		return total;
+	});
+	let maxMemoryGB = $derived(Math.max(1, Math.floor(availableMemoryMB / 1024)));
 
 	// Version lists for the create-instance dropdown, fetched live from each
 	// loader's own distribution API (the same ones internal/loader/*.go use
@@ -526,6 +587,7 @@
 		refreshResources();
 		refreshProxyStatus();
 		refreshDomainSettings();
+		refreshSwap();
 		loadMcVersions();
 		api.authStatus().then((s) => {
 			username = s.username;
@@ -639,12 +701,9 @@
 	let applyingConflict = $state(false);
 
 	// The proxy's 1GB isn't resizable here (see openMemoryConflictModal), so
-	// the budget being negotiated among the listed servers excludes it too.
-	let conflictMaxGB = $derived(
-		resources
-			? Math.max(1, Math.floor((resources.total_memory_mb - PROXY_RESERVED_MEMORY_MB) / 1024))
-			: 1
-	);
+	// the budget being negotiated among the listed servers excludes it too
+	// (when it's actually reserved at all -- see availableMemoryMB).
+	let conflictMaxGB = $derived(Math.max(1, Math.floor(availableMemoryMB / 1024)));
 	let conflictTotalGB = $derived(conflictItems.reduce((sum, i) => sum + i.memoryGB, 0));
 	let conflictOverBudget = $derived(conflictTotalGB > conflictMaxGB);
 
@@ -696,7 +755,7 @@
 			);
 			const projectedMB =
 				runningOthers.reduce((sum, i) => sum + i.memory_max_mb, 0) + (target?.memory_max_mb ?? 0);
-			if (target && resources && projectedMB > resources.total_memory_mb) {
+			if (target && resources && projectedMB > availableMemoryMB) {
 				openMemoryConflictModal(target, runningOthers);
 				return;
 			}
@@ -864,7 +923,12 @@
 			<div class="border-border bg-card rounded-lg border p-4 lg:sticky lg:top-8">
 				<h2 class="font-medium">라즈베리파이 리소스</h2>
 				{#if resources}
-					{@const memPercent = usagePercent(resources.used_memory_mb, resources.total_memory_mb)}
+					{@const swapTotalMB = swapInfo?.enabled ? swapInfo.size_mb : 0}
+					{@const swapUsedMB = swapInfo?.enabled ? swapInfo.used_mb : 0}
+					{@const memCombinedTotalMB = resources.total_memory_mb + swapTotalMB}
+					{@const memRAMPercentOfBar = usagePercent(resources.used_memory_mb, memCombinedTotalMB)}
+					{@const memSwapPercentOfBar = usagePercent(swapUsedMB, memCombinedTotalMB)}
+					{@const memRAMOwnPercent = usagePercent(resources.used_memory_mb, resources.total_memory_mb)}
 					{@const diskPercent = usagePercent(resources.used_disk_mb, resources.total_disk_mb)}
 					<div class="mt-3 space-y-4">
 						<div>
@@ -881,18 +945,28 @@
 						</div>
 						<div>
 							<div class="mb-1 flex justify-between text-xs">
-								<span class="text-muted-foreground">메모리</span>
+								<span class="text-muted-foreground">
+									메모리{#if swapTotalMB > 0}<span class="text-yellow-500"> (+스왑)</span>{/if}
+								</span>
 								<span
-									>{(resources.used_memory_mb / 1024).toFixed(1)}GB / {(
-										resources.total_memory_mb / 1024
-									).toFixed(1)}GB</span
+									>{(resources.used_memory_mb / 1024).toFixed(1)}{#if swapUsedMB > 0}<span
+											class="text-yellow-500">+{(swapUsedMB / 1024).toFixed(1)}</span
+										>{/if}GB / {(memCombinedTotalMB / 1024).toFixed(1)}GB</span
 								>
 							</div>
-							<div class="bg-background h-2 overflow-hidden rounded-full">
+							<!-- 라즈베리파이 OS의 zram(RAM 압축 스왑)과 별개인 CraftDeck 자체
+								디스크 스왑(FR-46)이 켜져 있으면, 막대 전체 길이를 물리 RAM+스왑
+								합산 용량 기준으로 놓고 두 구간으로 나눠 표시한다: 물리 RAM 사용량은
+								기존과 같은 임계값 색(barClass), 스왑 사용량 구간은 항상 노란색으로
+								구분해서 "지금 스왑까지 파고들었다"는 걸 한눈에 보이게 한다. -->
+							<div class="bg-background flex h-2 overflow-hidden rounded-full">
 								<div
-									class="h-full {barClass(memPercent)}"
-									style="width: {memPercent}%"
+									class="h-full {barClass(memRAMOwnPercent)}"
+									style="width: {memRAMPercentOfBar}%"
 								></div>
+								{#if memSwapPercentOfBar > 0}
+									<div class="h-full bg-yellow-500" style="width: {memSwapPercentOfBar}%"></div>
+								{/if}
 							</div>
 						</div>
 						<div>
@@ -1009,6 +1083,70 @@
 					</div>
 				{/if}
 			</div>
+
+			<!-- 가상 메모리(디스크 스왑파일) -- 라즈베리파이 OS의 zram(RAM 압축
+				스왑)과 별개로 동작하는 CraftDeck 전용 디스크 기반 스왑. SD카드/eMMC
+				부팅 환경(swapInfo.supported === false)에서는 카드 자체를 아예
+				숨긴다 -- 랜덤 쓰기 성능/수명이 나빠서 켜라고 권할 이유가 없음. -->
+			{#if swapInfo?.supported}
+			<div class="border-border bg-card mt-4 rounded-lg border p-4">
+				<h2 class="font-medium">가상 메모리 (스왑)</h2>
+				<p class="text-muted-foreground mt-1 text-xs">
+					라즈베리파이 OS의 zram(RAM 내 압축 스왑)과는 별개로, 실제 디스크 공간을 추가
+					여유분으로 씁니다. 커널은 항상 실제 RAM과 zram을 먼저 쓰고, 그걸로도 부족할 때만
+					이 스왑파일을 사용합니다.
+				</p>
+				{#if swapInfo}
+					<p class="mt-2 text-xs">
+						{#if swapInfo.enabled}
+							<span class="text-green-500">켜짐</span> -- {(swapInfo.size_mb / 1024).toFixed(1)}GB 중
+							{(swapInfo.used_mb / 1024).toFixed(1)}GB 사용 중
+						{:else if swapInfo.size_mb > 0}
+							<span class="text-muted-foreground">꺼짐</span> (파일은 {(swapInfo.size_mb / 1024).toFixed(
+								1
+							)}GB로 남아있음)
+						{:else}
+							<span class="text-muted-foreground">설정 안 됨</span>
+						{/if}
+					</p>
+					<p class="text-muted-foreground mt-1 text-xs">
+						여유 공간: {(swapInfo.free_disk_mb / 1024).toFixed(1)}GB (스왑파일 자체 크기 포함)
+					</p>
+					<div class="mt-2 flex gap-2">
+						<div class="border-input bg-background flex min-w-0 flex-1 items-center rounded-md border px-2 py-1.5">
+							<input
+								type="number"
+								min="0.1"
+								step="0.1"
+								bind:value={swapSizeInput}
+								placeholder="예: 4"
+								class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+							/>
+							<span class="text-muted-foreground shrink-0 text-sm">GB</span>
+						</div>
+						<button
+							class="bg-primary text-primary-foreground shrink-0 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+							disabled={swapSaving}
+							onclick={saveSwap}
+						>
+							{swapSaving ? '적용 중...' : '적용'}
+						</button>
+					</div>
+					{#if swapInfo.enabled}
+						<button
+							class="border-border text-destructive mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
+							disabled={swapSaving}
+							onclick={disableSwap}
+						>
+							끄고 삭제
+						</button>
+					{/if}
+					{#if swapError}
+						<p class="text-destructive mt-2 text-xs">{swapError}</p>
+					{/if}
+				{/if}
+			</div>
+			{/if}
 
 			<!-- FR-26 minimal skeleton + FR-1f: 도메인 연결 여부가 Velocity
 				기본 프록시 사용 여부를 결정합니다. -->

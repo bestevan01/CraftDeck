@@ -102,6 +102,9 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /api/system/health", s.handleHealth)
 	mux.HandleFunc("GET /api/system/resources", s.handleSystemResources)
+	mux.HandleFunc("GET /api/system/swap", s.handleGetSwap)
+	mux.HandleFunc("PUT /api/system/swap", s.handleSetSwap)
+	mux.HandleFunc("DELETE /api/system/swap", s.handleDeleteSwap)
 
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/setup", s.handleSetup)

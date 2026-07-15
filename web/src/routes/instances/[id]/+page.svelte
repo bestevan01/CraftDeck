@@ -13,7 +13,9 @@
 		type BuildInfo,
 		type ServerSetting,
 		type NetworkAddresses,
-		type DomainConfig
+		type DomainConfig,
+		type ProxyStatus,
+		type SwapInfo
 	} from '$lib/api';
 	import { onDestroy, onMount, tick } from 'svelte';
 
@@ -374,11 +376,23 @@
 
 	async function loadSystemResources() {
 		try {
-			const res = await api.systemResources();
+			const [res, proxyStatus, swapInfo] = await Promise.all([
+				api.systemResources(),
+				api.getProxyStatus().catch(() => null as ProxyStatus | null),
+				api.getSwap().catch(() => null as SwapInfo | null)
+			]);
 			// The always-on Velocity proxy has a fixed 1GB allocation (see
 			// PROXY_RESERVED_MEMORY_MB) that this server's slider shouldn't be
-			// able to eat into.
-			maxMemoryGB = Math.max(1, Math.floor((res.total_memory_mb - PROXY_RESERVED_MEMORY_MB) / 1024));
+			// able to eat into -- but only while it actually exists and is
+			// running; if it's torn down (FR-1f, no main domain registered) or
+			// just not running right now, nothing is reserved. CraftDeck's own
+			// swap file (internal/swap), if turned on, adds to the ceiling too --
+			// instances only actually get to use it when it's on (see AllowSwap
+			// in startInstanceCore).
+			let total = res.total_memory_mb;
+			if (swapInfo?.enabled) total += swapInfo.size_mb;
+			if (proxyStatus?.exists && proxyStatus.running) total -= PROXY_RESERVED_MEMORY_MB;
+			maxMemoryGB = Math.max(1, Math.floor(total / 1024));
 		} catch {
 			// leave the placeholder -- worst case the slider just caps at 1GB
 		}

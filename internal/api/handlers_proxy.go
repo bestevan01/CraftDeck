@@ -767,7 +767,16 @@ func (s *Server) handleSetServerSubdomain(w http.ResponseWriter, r *http.Request
 }
 
 type proxyStatusResponse struct {
-	Exists          bool   `json:"exists"`
+	Exists bool `json:"exists"`
+	// Running lets the frontend free up the 1GB reserved for the proxy
+	// (proxyMemoryMaxMB) toward independently-exposed instances' memory
+	// sliders whenever it isn't actually running -- not just whenever it
+	// doesn't exist at all. In steady state the two track each other
+	// closely (FR-1f's ReconcileProxyMode/EnsureProxyRunning keep a
+	// registered main domain's proxy running, and tear the instance down
+	// entirely otherwise), but this stays correct through the brief window
+	// where it exists yet hasn't (re)started yet.
+	Running         bool   `json:"running"`
 	CurrentVersion  string `json:"current_version,omitempty"`
 	LatestVersion   string `json:"latest_version,omitempty"`
 	UpdateAvailable bool   `json:"update_available"`
@@ -798,6 +807,7 @@ func (s *Server) handleGetProxyStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, proxyStatusResponse{
 		Exists:          true,
+		Running:         proxy.Status == instance.StatusRunning,
 		CurrentVersion:  proxy.MCVersion,
 		LatestVersion:   latest,
 		UpdateAvailable: latest != "" && latest != proxy.MCVersion,

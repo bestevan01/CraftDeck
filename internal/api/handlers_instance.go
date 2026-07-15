@@ -21,6 +21,7 @@ import (
 	"craftdeck/internal/loader"
 	"craftdeck/internal/modrinth"
 	"craftdeck/internal/process"
+	"craftdeck/internal/swap"
 
 	"github.com/google/uuid"
 )
@@ -720,6 +721,15 @@ func (s *Server) startInstanceCore(ctx context.Context, inst *instance.Instance)
 		javaArgs = append(javaArgs, "nogui") // Velocity's own main() doesn't expect/want this arg
 	}
 
+	// Only let this instance page out to swap if CraftDeck's own swap file
+	// is actually turned on -- otherwise a memory_max_mb above physical RAM
+	// (see handleUpdateInstance's swap-aware ceiling) has nowhere real to
+	// go and should OOM-kill rather than silently do nothing.
+	swapStatus, err := swap.Status(ctx, s.dataDir)
+	if err != nil {
+		log.Printf("start %s: check swap status (continuing without swap): %v", inst.ID, err)
+	}
+
 	spec := process.StartSpec{
 		InstanceID:      inst.ID,
 		WorkDir:         inst.WorkDir,
@@ -728,6 +738,7 @@ func (s *Server) startInstanceCore(ctx context.Context, inst *instance.Instance)
 		JavaArgs:        javaArgs,
 		CPUQuotaPercent: inst.CPUQuotaPercent,
 		MemoryMaxMB:     inst.MemoryMaxMB,
+		AllowSwap:       swapStatus != nil && swapStatus.Enabled,
 	}
 
 	if err := s.supervisor.Start(ctx, spec); err != nil {

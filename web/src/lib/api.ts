@@ -106,6 +106,10 @@ export type FileEntry = {
 
 export type ProxyStatus = {
 	exists: boolean;
+	// Lets the memory-slider ceiling free up the 1GB reserved for the
+	// proxy whenever it isn't actually running, not just whenever it
+	// doesn't exist at all.
+	running: boolean;
 	current_version?: string;
 	latest_version?: string;
 	update_available: boolean;
@@ -145,6 +149,19 @@ export type NetworkSettings = {
 export type NetworkAddresses = {
 	local_ip: string;
 	public_ip?: string;
+};
+
+// Mirrors internal/swap.Info -- CraftDeck's own disk-backed swap file,
+// independent of any RAM-based swap (e.g. zram) the OS already runs.
+export type SwapInfo = {
+	// False on storage a disk-backed swap file would actively hurt (an SD
+	// card/eMMC) rather than just not need -- the frontend hides the
+	// feature entirely in that case instead of just disabling controls.
+	supported: boolean;
+	enabled: boolean;
+	size_mb: number;
+	used_mb: number;
+	free_disk_mb: number;
 };
 
 // Mirrors internal/ddns.Config -- whether an owned domain or only a free
@@ -424,6 +441,12 @@ export const api = {
 	deleteFile: (id: string, path: string) =>
 		req<void>(`/api/instances/${id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
 	upgradeProxy: () => req<UpgradeProxyResult>('/api/proxy/upgrade', { method: 'POST' }),
+	// CraftDeck's own disk-backed swap file -- independent of any RAM-based
+	// swap (e.g. Raspberry Pi OS's zram) the base OS may already run.
+	getSwap: () => req<SwapInfo>('/api/system/swap'),
+	setSwap: (sizeMB: number) =>
+		req<SwapInfo>('/api/system/swap', { method: 'PUT', body: JSON.stringify({ size_mb: sizeMB }) }),
+	deleteSwap: () => req<{ ok: boolean }>('/api/system/swap', { method: 'DELETE' }),
 	// FR-21/22/23/25: "외부 접속 허용" toggle (web UI + every reachable game
 	// port) + UPnP/NAT-PMP automation.
 	getNetworkSettings: () => req<NetworkSettings>('/api/network/settings'),
