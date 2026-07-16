@@ -638,8 +638,8 @@
 			isLoggedIn = s.authenticated;
 			totpEnabled = s.totp_enabled;
 		});
-		pollHandle = setInterval(refresh, 3000);
-		resourcePollHandle = setInterval(refreshResources, 5000);
+		pollHandle = setInterval(refresh, 2000);
+		resourcePollHandle = setInterval(refreshResources, 2000);
 	});
 	onDestroy(() => {
 		clearInterval(pollHandle);
