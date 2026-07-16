@@ -286,6 +286,12 @@
 	// 때를 대비한 추가 여유분 성격이라 커널이 항상 실제 RAM/zram을 먼저 쓰고
 	// 남을 때만 사용한다.
 	let swapInfo = $state<SwapInfo | null>(null);
+	// Set only when the GET itself fails (network/auth hiccup) -- kept
+	// distinct from swapInfo.supported === false (genuinely SD-card/eMMC
+	// storage) so the card can tell the two apart instead of just
+	// disappearing either way, which made a transient fetch failure look
+	// identical to "this feature doesn't exist on this hardware."
+	let swapFetchError = $state('');
 	// GB in the UI, converted to/from the API's MB at the boundary --
 	// backend (internal/swap) still stores/reports everything in MB.
 	let swapSizeInput = $state('');
