@@ -14,35 +14,28 @@ fi
 mkdir -p /var/lib/craftdeck /etc/craftdeck
 chown craftdeck:craftdeck /var/lib/craftdeck /etc/craftdeck
 
-# 2. Register the Adoptium APT repository using the GPG key bundled in
-#    this package (FR-42c: no network fetch of the key at install time).
-if [ ! -f /etc/apt/sources.list.d/adoptium.list ]; then
-	echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release) main" \
-		> /etc/apt/sources.list.d/adoptium.list
-fi
+# 2. Java 8/17/21/25 (Adoptium Temurin, FR-42/FR-42a/FR-42g) are declared as
+#    real apt Depends (see packaging/nfpm.yaml) rather than installed here
+#    with a nested `apt-get install` -- this script runs *inside* the outer
+#    `apt-get install craftdeck` transaction, which already holds
+#    /var/lib/dpkg/lock-frontend, so a second apt-get call from here would
+#    deadlock against it instead of just failing (confirmed on real
+#    hardware: "Could not get lock ... held by process ... (apt-get)").
+#    Registering the Adoptium repo itself is install.sh's job, since that
+#    has to happen *before* the outer transaction starts for apt to be able
+#    to resolve these Depends at all.
 
-# 3. Install Java 8/17/21/25 from Adoptium (FR-42, FR-42a, FR-42g -- 25 added
-#    for Minecraft 26.1+, which switched to a year.release version scheme and
-#    recommends Java 25). Fail loudly rather than continuing with a
-#    half-installed service (FR-42d).
-apt-get update
-if ! apt-get install -y temurin-8-jre temurin-17-jre temurin-21-jre temurin-25-jre; then
-	echo "craftdeck: failed to install Java runtimes from the Adoptium repository." >&2
-	echo "craftdeck: check network connectivity / packages.adoptium.net reachability and re-run 'apt install -f'." >&2
-	exit 1
-fi
-
-# 4. Enable and start the service so the daemon is running immediately
+# 3. Enable and start the service so the daemon is running immediately
 #    after install, with no extra steps required from the user (FR-43).
 systemctl daemon-reload
 systemctl enable --now craftdeck.service
 
-# 5. Apply the console log retention/rotation policy (FR-16,
+# 4. Apply the console log retention/rotation policy (FR-16,
 #    /etc/systemd/journald.conf.d/craftdeck.conf) immediately -- journald
 #    only picks up config changes on restart, not on next log write.
 systemctl restart systemd-journald
 
-# 6. Surface the admin URL right away -- otherwise the operator has no way
+# 5. Surface the admin URL right away -- otherwise the operator has no way
 #    to know the service is even reachable, let alone at what address,
 #    right after `apt install craftdeck` finishes. hostname -I's first
 #    entry is the primary LAN IP on a typical single-NIC Raspberry Pi

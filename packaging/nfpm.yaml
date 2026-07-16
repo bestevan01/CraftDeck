@@ -10,10 +10,19 @@ license: MIT
 
 depends:
   - ca-certificates
-  # Java (Adoptium Temurin 8/17/21) is intentionally NOT an apt Depends --
-  # postinst registers the Adoptium repo and installs it there, since
-  # Debian Bookworm's own repo only ships openjdk-17 (requirements.md
-  # FR-42a). See scripts/postinst.
+  # Debian's own repo only ships openjdk-17 (requirements.md FR-42a), so
+  # these come from Adoptium instead -- registering that repo is install.sh's
+  # job (it must run *before* this package's own apt transaction starts, not
+  # postinst: postinst runs nested inside the outer `apt-get install`
+  # invoking it, which already holds /var/lib/dpkg/lock-frontend, so a
+  # second apt-get call from inside postinst deadlocks against it rather
+  # than just failing-and-retrying. Declaring these as real Depends instead
+  # lets apt resolve/install them as part of the same outer transaction,
+  # with no nested apt-get involved at all.
+  - temurin-8-jre
+  - temurin-17-jre
+  - temurin-21-jre
+  - temurin-25-jre
 
 contents:
   - src: ../build/craftdeckd
