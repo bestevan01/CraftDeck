@@ -43,6 +43,11 @@
 			} else {
 				const result = await api.login(username, password, needsTotp ? totpCode : undefined);
 				if (result.totp_required) {
+					// Not an error -- the password was correct, this account
+					// just also has 2FA enabled. A separate screen (rather
+					// than a field quietly appearing below the password box)
+					// makes it unambiguous that this is a distinct step, not
+					// a glitch.
 					needsTotp = true;
 					submitting = false;
 					return;
@@ -55,6 +60,17 @@
 			submitting = false;
 		}
 	}
+
+	// Drops back to the username/password screen -- clears the password
+	// (and any leftover code) rather than leaving a verified-but-unused
+	// credential sitting in memory, same reasoning as clearing other
+	// one-time-use secrets elsewhere in this app (e.g. domain tokens).
+	function backToCredentials() {
+		needsTotp = false;
+		totpCode = '';
+		password = '';
+		error = '';
+	}
 </script>
 
 <main class="bg-background text-foreground flex min-h-screen items-center justify-center p-8">
@@ -63,6 +79,49 @@
 
 		{#if mode === 'loading'}
 			<p class="text-muted-foreground mt-4 text-sm">불러오는 중...</p>
+		{:else if needsTotp}
+			<!-- FR-37: a separate screen once the password's already been
+				verified -- makes it unambiguous that this is a distinct step
+				(not the same form growing a field, which could look like a
+				glitch). -->
+			<p class="text-muted-foreground mt-1 text-sm">
+				비밀번호가 확인됐습니다. 이 계정은 2단계 인증이 켜져 있어, 인증 앱의 코드를 마저
+				입력해야 합니다.
+			</p>
+			<form class="mt-4 space-y-4" onsubmit={submit}>
+				<div>
+					<label class="mb-1 block text-sm font-medium" for="totp-code">2단계 인증 코드</label>
+					<!-- svelte-ignore a11y_autofocus -->
+					<input
+						id="totp-code"
+						type="text"
+						inputmode="numeric"
+						autocomplete="one-time-code"
+						autofocus
+						required
+						placeholder="인증 앱의 6자리 코드 (또는 백업 코드)"
+						bind:value={totpCode}
+						class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+					/>
+				</div>
+				{#if error}
+					<p class="text-destructive text-sm">{error}</p>
+				{/if}
+				<button
+					type="submit"
+					disabled={submitting}
+					class="bg-primary text-primary-foreground w-full rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
+				>
+					{submitting ? '확인 중...' : '확인'}
+				</button>
+				<button
+					type="button"
+					class="text-muted-foreground w-full text-center text-xs hover:underline"
+					onclick={backToCredentials}
+				>
+					다른 계정으로 로그인
+				</button>
+			</form>
 		{:else}
 			{#if mode === 'setup'}
 				<p class="text-muted-foreground mt-1 text-sm">
@@ -100,21 +159,6 @@
 						<p class="text-muted-foreground mt-1 text-xs">8자 이상</p>
 					{/if}
 				</div>
-				{#if needsTotp}
-					<div>
-						<label class="mb-1 block text-sm font-medium" for="totp-code">2단계 인증 코드</label>
-						<input
-							id="totp-code"
-							type="text"
-							inputmode="numeric"
-							autocomplete="one-time-code"
-							required
-							placeholder="인증 앱의 6자리 코드 (또는 백업 코드)"
-							bind:value={totpCode}
-							class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
-						/>
-					</div>
-				{/if}
 				{#if error}
 					<p class="text-destructive text-sm">{error}</p>
 				{/if}
