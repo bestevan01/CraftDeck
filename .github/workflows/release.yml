@@ -1,23 +1,33 @@
 name: Release
 
 # Builds the arm64 .deb on every version tag push, publishes it into a
-# reprepro-managed apt repository, and pushes that repository (static
-# Release/Packages/pool files) to the gh-pages branch, which GitHub Pages
-# serves at the custom domain configured in repo Settings -> Pages. This is
-# the whole reason `sudo apt install craftdeck` can work on a fresh
-# Raspberry Pi OS install with no manual repo setup beyond adding this
-# apt source once (see README/requirements.md packaging notes).
+# reprepro-managed apt repository, and deploys that repository (static
+# Release/Packages/pool files) via GitHub's native Pages deployment (repo
+# Settings -> Pages -> Source: GitHub Actions), which then serves it at the
+# custom domain configured there. This is the whole reason
+# `sudo apt install craftdeck` can work on a fresh Raspberry Pi OS install
+# with no manual repo setup beyond adding this apt source once (see
+# README/requirements.md packaging notes).
 on:
   push:
     tags:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -94,10 +104,11 @@ jobs:
             "build/craftdeck_${{ steps.version.outputs.version }}_arm64.deb"
           cp packaging/craftdeck-archive-keyring.gpg packaging/apt-repo/craftdeck-archive-keyring.gpg
 
-      - name: Deploy apt repo to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload apt repo as Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: packaging/apt-repo
-          publish_branch: gh-pages
-          cname: apt.apple-farm.online
+          path: packaging/apt-repo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
