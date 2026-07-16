@@ -11,7 +11,20 @@
 		type DomainConfig,
 		type SwapInfo
 	} from '$lib/api';
+	import MemorySlider from '$lib/MemorySlider.svelte';
+	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
 	import { onDestroy, onMount } from 'svelte';
+
+	// Shared by every destructive action on this page (see ConfirmDialog.svelte
+	// for why this replaced the browser's native confirm()).
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state<() => void>(() => {});
+	function askConfirm(message: string, action: () => void) {
+		confirmMessage = message;
+		confirmAction = action;
+		confirmOpen = true;
+	}
 
 	async function logout() {
 		await api.logout();
@@ -271,11 +284,12 @@
 	async function refreshSwap() {
 		try {
 			swapInfo = await api.getSwap();
+			swapFetchError = '';
 			if (!swapSizeInput && swapInfo.size_mb > 0) {
 				swapSizeInput = String(swapInfo.size_mb / 1024);
 			}
-		} catch {
-			// non-critical panel -- leave last known status as-is
+		} catch (err) {
+			swapFetchError = err instanceof Error ? err.message : String(err);
 		}
 	}
 
@@ -297,8 +311,11 @@
 		}
 	}
 
-	async function disableSwap() {
-		if (!confirm('스왑파일을 완전히 끄고 삭제할까요?')) return;
+	function disableSwap() {
+		askConfirm('스왑파일을 완전히 끄고 삭제할까요?', doDisableSwap);
+	}
+
+	async function doDisableSwap() {
 		swapSaving = true;
 		swapError = '';
 		try {
@@ -460,6 +477,16 @@
 		return total;
 	});
 	let maxMemoryGB = $derived(Math.max(1, Math.floor(availableMemoryMB / 1024)));
+	// Where the slider's marker sits -- physical RAM alone, minus the same
+	// proxy reservation availableMemoryMB subtracts, so the marker lines up
+	// with "this much is real RAM" rather than counting the reserved 1GB
+	// as swappable headroom.
+	let ramBoundaryGB = $derived.by(() => {
+		if (!resources) return maxMemoryGB;
+		let ram = resources.total_memory_mb;
+		if (proxyStatus?.exists && proxyStatus.running) ram -= PROXY_RESERVED_MEMORY_MB;
+		return Math.max(1, Math.floor(ram / 1024));
+	});
 
 	// Version lists for the create-instance dropdown, fetched live from each
 	// loader's own distribution API (the same ones internal/loader/*.go use
@@ -737,6 +764,18 @@
 					cpu_quota_percent: original.cpu_quota_percent,
 					memory_max_mb: item.memoryGB * 1024
 				});
+				// Already-running instances (not the target, which is about to
+				// be started fresh right below and picks up its new allocation
+				// automatically) need an explicit restart to actually free up
+				// the memory this negotiation assumed they would -- otherwise
+				// the old JVM keeps running at its old size until the operator
+				// happens to restart it some other time, and "적용 후 시작"
+				// only *looked* like it resolved the conflict (confirmed: this
+				// was exactly the bug -- already-running instances never
+				// actually got restarted).
+				if (item.isRunning && !item.isTarget) {
+					await api.restartInstance(item.id);
+				}
 			}
 			showMemoryConflictModal = false;
 			await start(conflictTargetId, true);
@@ -779,8 +818,11 @@
 		}
 	}
 
-	async function remove(id: string) {
-		if (!confirm('이 인스턴스를 삭제할까요? 월드 데이터도 함께 지워집니다.')) return;
+	function remove(id: string) {
+		askConfirm('이 인스턴스를 삭제할까요? 월드 데이터도 함께 지워집니다.', () => doRemove(id));
+	}
+
+	async function doRemove(id: string) {
 		busyId = id;
 		try {
 			await api.deleteInstance(id);
@@ -1087,70 +1129,83 @@
 			<!-- 가상 메모리(디스크 스왑파일) -- 라즈베리파이 OS의 zram(RAM 압축
 				스왑)과 별개로 동작하는 CraftDeck 전용 디스크 기반 스왑. SD카드/eMMC
 				부팅 환경(swapInfo.supported === false)에서는 카드 자체를 아예
-				숨긴다 -- 랜덤 쓰기 성능/수명이 나빠서 켜라고 권할 이유가 없음. -->
-			{#if swapInfo?.supported}
-			<div class="border-border bg-card mt-4 rounded-lg border p-4">
-				<h2 class="font-medium">가상 메모리 (스왑)</h2>
-				<p class="text-muted-foreground mt-1 text-xs">
-					라즈베리파이 OS의 zram(RAM 내 압축 스왑)과는 별개로, 실제 디스크 공간을 추가
-					여유분으로 씁니다. 커널은 항상 실제 RAM과 zram을 먼저 쓰고, 그걸로도 부족할 때만
-					이 스왑파일을 사용합니다.
-				</p>
-				{#if swapInfo}
-					<p class="mt-2 text-xs">
-						{#if swapInfo.enabled}
-							<span class="text-green-500">켜짐</span> -- {(swapInfo.size_mb / 1024).toFixed(1)}GB 중
-							{(swapInfo.used_mb / 1024).toFixed(1)}GB 사용 중
-						{:else if swapInfo.size_mb > 0}
-							<span class="text-muted-foreground">꺼짐</span> (파일은 {(swapInfo.size_mb / 1024).toFixed(
-								1
-							)}GB로 남아있음)
-						{:else}
-							<span class="text-muted-foreground">설정 안 됨</span>
-						{/if}
-					</p>
+				숨긴다 -- 랜덤 쓰기 성능/수명이 나빠서 켜라고 권할 이유가 없음. 다만
+				이건 "확인해보니 지원 안 함"으로 확정된 경우만이고, 조회 자체가
+				실패한 경우(swapFetchError)는 구분해서 에러로 보여준다 -- 안 그러면
+				일시적 네트워크 오류와 "이 하드웨어는 지원 안 함"이 똑같이 카드가
+				사라지는 걸로 보여서 구분이 안 됐다. -->
+			{#if swapInfo === null || swapInfo.supported}
+				<div class="border-border bg-card rounded-lg border p-4">
+					<h2 class="font-medium">가상 메모리 (스왑)</h2>
 					<p class="text-muted-foreground mt-1 text-xs">
-						여유 공간: {(swapInfo.free_disk_mb / 1024).toFixed(1)}GB (스왑파일 자체 크기 포함)
+						라즈베리파이 OS의 zram(RAM 내 압축 스왑)과는 별개로, 실제 디스크 공간을 추가
+						여유분으로 씁니다. 커널은 항상 실제 RAM과 zram을 먼저 쓰고, 그걸로도 부족할 때만
+						이 스왑파일을 사용합니다.
 					</p>
-					<div class="mt-2 flex gap-2">
-						<div class="border-input bg-background flex min-w-0 flex-1 items-center rounded-md border px-2 py-1.5">
-							<input
-								type="number"
-								min="0.1"
-								step="0.1"
-								bind:value={swapSizeInput}
-								placeholder="예: 4"
-								class="min-w-0 flex-1 bg-transparent text-sm outline-none"
-							/>
-							<span class="text-muted-foreground shrink-0 text-sm">GB</span>
+					{#if swapFetchError}
+						<p class="text-destructive mt-2 text-xs">
+							상태를 불러오지 못했습니다: {swapFetchError}
+						</p>
+					{:else if swapInfo}
+						<p class="mt-2 text-xs">
+							{#if swapInfo.enabled}
+								<span class="text-green-500">켜짐</span> -- {(swapInfo.size_mb / 1024).toFixed(
+									1
+								)}GB 중 {(swapInfo.used_mb / 1024).toFixed(1)}GB 사용 중
+							{:else if swapInfo.size_mb > 0}
+								<span class="text-muted-foreground">꺼짐</span> (파일은 {(
+									swapInfo.size_mb / 1024
+								).toFixed(1)}GB로 남아있음)
+							{:else}
+								<span class="text-muted-foreground">설정 안 됨</span>
+							{/if}
+						</p>
+						<p class="text-muted-foreground mt-1 text-xs">
+							여유 공간: {(swapInfo.free_disk_mb / 1024).toFixed(1)}GB (스왑파일 자체 크기 포함)
+						</p>
+						<div class="mt-2 flex gap-2">
+							<div
+								class="border-input bg-background flex min-w-0 flex-1 items-center rounded-md border px-2 py-1.5"
+							>
+								<input
+									type="number"
+									min="0.1"
+									step="0.1"
+									bind:value={swapSizeInput}
+									placeholder="예: 4"
+									class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+								/>
+								<span class="text-muted-foreground shrink-0 text-sm">GB</span>
+							</div>
+							<button
+								class="bg-primary text-primary-foreground shrink-0 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+								disabled={swapSaving}
+								onclick={saveSwap}
+							>
+								{swapSaving ? '적용 중...' : '적용'}
+							</button>
 						</div>
-						<button
-							class="bg-primary text-primary-foreground shrink-0 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-							disabled={swapSaving}
-							onclick={saveSwap}
-						>
-							{swapSaving ? '적용 중...' : '적용'}
-						</button>
-					</div>
-					{#if swapInfo.enabled}
-						<button
-							class="border-border text-destructive mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
-							disabled={swapSaving}
-							onclick={disableSwap}
-						>
-							끄고 삭제
-						</button>
+						{#if swapInfo.enabled}
+							<button
+								class="border-border text-destructive mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
+								disabled={swapSaving}
+								onclick={disableSwap}
+							>
+								끄고 삭제
+							</button>
+						{/if}
+						{#if swapError}
+							<p class="text-destructive mt-2 text-xs">{swapError}</p>
+						{/if}
+					{:else}
+						<p class="text-muted-foreground mt-2 text-xs">불러오는 중...</p>
 					{/if}
-					{#if swapError}
-						<p class="text-destructive mt-2 text-xs">{swapError}</p>
-					{/if}
-				{/if}
-			</div>
+				</div>
 			{/if}
 
 			<!-- FR-26 minimal skeleton + FR-1f: 도메인 연결 여부가 Velocity
 				기본 프록시 사용 여부를 결정합니다. -->
-			<div class="border-border bg-card mt-4 rounded-lg border p-4">
+			<div class="border-border bg-card rounded-lg border p-4">
 				<h2 class="font-medium">도메인 연결</h2>
 				<p class="text-muted-foreground mt-1 text-xs">
 					소유한 메인 도메인을 연결하면 Velocity 프록시가 자동으로 켜져서 여러 서버를 서브도메인으로
@@ -1540,16 +1595,15 @@
 				{/if}
 				<div>
 					<label class="mb-1 block text-sm font-medium" for="create-memory">
-						최대 메모리 ({form.memory_gb}GB / 최대 {maxMemoryGB}GB)
+						최대 메모리 ({form.memory_gb}GB / 최대 {maxMemoryGB}GB{#if ramBoundaryGB < maxMemoryGB}<span
+								class="text-yellow-500"> · 스왑 {maxMemoryGB - ramBoundaryGB}GB 포함</span
+							>{/if})
 					</label>
-					<input
+					<MemorySlider
 						id="create-memory"
-						type="range"
-						min="1"
-						max={maxMemoryGB}
-						step="1"
 						bind:value={form.memory_gb}
-						class="w-full"
+						maxGB={maxMemoryGB}
+						{ramBoundaryGB}
 					/>
 				</div>
 				<div>
@@ -1846,8 +1900,9 @@
 		>
 			<h2 class="font-medium">메모리 할당 조정 필요</h2>
 			<p class="text-muted-foreground mt-1 text-xs">
-				실행하려는 서버들의 메모리 할당 합이 라즈베리파이의 전체 메모리를 초과합니다. 아래에서
-				조정한 뒤 시작할 수 있습니다.
+				실행하려는 서버들의 메모리 할당 합이 {ramBoundaryGB < conflictMaxGB
+					? '물리 RAM + 스왑 여유분'
+					: '라즈베리파이의 전체 메모리'}을(를) 초과합니다. 아래에서 조정한 뒤 시작할 수 있습니다.
 			</p>
 
 			<div class="mt-3 space-y-3">
@@ -1858,19 +1913,16 @@
 								{item.name}
 								{#if item.isTarget}<span class="text-muted-foreground">(시작 예정)</span>
 								{:else if item.isRunning}<span class="text-muted-foreground"
-										>(실행 중 -- 재시작해야 반영됨)</span
+										>(실행 중 -- 변경 시 자동으로 재시작됩니다)</span
 									>{/if}
 							</span>
 							<span>{item.memoryGB}GB</span>
 						</label>
-						<input
+						<MemorySlider
 							id="conflict-{item.id}"
-							type="range"
-							min="1"
-							max={conflictMaxGB}
-							step="1"
 							bind:value={item.memoryGB}
-							class="w-full"
+							maxGB={conflictMaxGB}
+							{ramBoundaryGB}
 						/>
 					</div>
 				{/each}
@@ -1899,3 +1951,5 @@
 		</div>
 	</div>
 {/if}
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />

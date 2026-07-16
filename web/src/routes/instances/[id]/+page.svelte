@@ -17,7 +17,20 @@
 		type ProxyStatus,
 		type SwapInfo
 	} from '$lib/api';
+	import MemorySlider from '$lib/MemorySlider.svelte';
+	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
 	import { onDestroy, onMount, tick } from 'svelte';
+
+	// Shared by every destructive action on this page (see ConfirmDialog.svelte
+	// for why this replaced the browser's native confirm()).
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state<() => void>(() => {});
+	function askConfirm(message: string, action: () => void) {
+		confirmMessage = message;
+		confirmAction = action;
+		confirmOpen = true;
+	}
 
 	const id = $page.params.id as string; // always present: this route only matches with an id segment
 
@@ -373,6 +386,12 @@
 	// in from /api/system/resources on mount; 1 is just a safe placeholder
 	// until that responds.
 	let maxMemoryGB = $state(1);
+	// Where the slider's physical-RAM/swap marker sits (see MemorySlider) --
+	// physical RAM alone, minus the same proxy reservation maxMemoryGB
+	// subtracts, so the marker lines up with "this much is real RAM" rather
+	// than counting the reserved 1GB as swappable headroom. Defaults equal
+	// to maxMemoryGB (no marker shown) until the real numbers load.
+	let ramBoundaryGB = $state(1);
 
 	async function loadSystemResources() {
 		try {
@@ -389,9 +408,11 @@
 			// swap file (internal/swap), if turned on, adds to the ceiling too --
 			// instances only actually get to use it when it's on (see AllowSwap
 			// in startInstanceCore).
-			let total = res.total_memory_mb;
+			let ram = res.total_memory_mb;
+			if (proxyStatus?.exists && proxyStatus.running) ram -= PROXY_RESERVED_MEMORY_MB;
+			let total = ram;
 			if (swapInfo?.enabled) total += swapInfo.size_mb;
-			if (proxyStatus?.exists && proxyStatus.running) total -= PROXY_RESERVED_MEMORY_MB;
+			ramBoundaryGB = Math.max(1, Math.floor(ram / 1024));
 			maxMemoryGB = Math.max(1, Math.floor(total / 1024));
 		} catch {
 			// leave the placeholder -- worst case the slider just caps at 1GB
@@ -608,9 +629,14 @@
 		}
 	}
 
-	async function deleteEntry(entry: FileEntry) {
+	function deleteEntry(entry: FileEntry) {
 		const label = entry.is_dir ? '폴더(안의 모든 내용 포함)' : '파일';
-		if (!confirm(`이 ${label}을(를) 삭제할까요? 되돌릴 수 없습니다.\n\n${entry.path}`)) return;
+		askConfirm(`이 ${label}을(를) 삭제할까요? 되돌릴 수 없습니다.\n\n${entry.path}`, () =>
+			doDeleteEntry(entry)
+		);
+	}
+
+	async function doDeleteEntry(entry: FileEntry) {
 		try {
 			await api.deleteFile(id, entry.path);
 			await refreshFiles();
@@ -640,12 +666,14 @@
 		}
 	}
 
-	async function restoreBackup(backupId: string) {
-		if (
-			!confirm('이 백업으로 복원하면 현재 월드/설정이 백업 시점 상태로 전부 대체됩니다. 계속할까요?')
-		) {
-			return;
-		}
+	function restoreBackup(backupId: string) {
+		askConfirm(
+			'이 백업으로 복원하면 현재 월드/설정이 백업 시점 상태로 전부 대체됩니다. 계속할까요?',
+			() => doRestoreBackup(backupId)
+		);
+	}
+
+	async function doRestoreBackup(backupId: string) {
 		busyBackupId = backupId;
 		try {
 			await api.restoreBackup(id, backupId);
@@ -656,8 +684,11 @@
 		}
 	}
 
-	async function deleteBackup(backupId: string) {
-		if (!confirm('이 백업을 삭제할까요?')) return;
+	function deleteBackup(backupId: string) {
+		askConfirm('이 백업을 삭제할까요?', () => doDeleteBackup(backupId));
+	}
+
+	async function doDeleteBackup(backupId: string) {
 		busyBackupId = backupId;
 		try {
 			await api.deleteBackup(id, backupId);
@@ -827,8 +858,11 @@
 		}
 	}
 
-	async function deletePlugin(p: Plugin) {
-		if (!confirm(`${p.filename}을(를) 삭제할까요?`)) return;
+	function deletePlugin(p: Plugin) {
+		askConfirm(`${p.filename}을(를) 삭제할까요?`, () => doDeletePlugin(p));
+	}
+
+	async function doDeletePlugin(p: Plugin) {
 		busyPluginId = p.id;
 		try {
 			await api.deletePlugin(id, p.id);
@@ -1019,14 +1053,14 @@
 		}
 	}
 
-	async function unregisterFromProxy() {
-		if (
-			!confirm(
-				'이 서버를 프록시에서 빼고 독립 노출로 전환할까요? 서버를 재시작해야 실제로 적용됩니다.'
-			)
-		) {
-			return;
-		}
+	function unregisterFromProxy() {
+		askConfirm(
+			'이 서버를 프록시에서 빼고 독립 노출로 전환할까요? 서버를 재시작해야 실제로 적용됩니다.',
+			doUnregisterFromProxy
+		);
+	}
+
+	async function doUnregisterFromProxy() {
 		unregisteringProxy = true;
 		proxyRegError = '';
 		try {
@@ -1279,16 +1313,15 @@
 					{:else}
 						<div>
 							<label class="text-muted-foreground mb-1 block text-xs" for="settings-memory">
-								메모리 할당 ({settingsMemoryGB}GB / 최대 {maxMemoryGB}GB)
+								메모리 할당 ({settingsMemoryGB}GB / 최대 {maxMemoryGB}GB{#if ramBoundaryGB < maxMemoryGB}<span
+										class="text-yellow-500"> · 스왑 {maxMemoryGB - ramBoundaryGB}GB 포함</span
+									>{/if})
 							</label>
-							<input
+							<MemorySlider
 								id="settings-memory"
-								type="range"
-								min="1"
-								max={maxMemoryGB}
-								step="1"
 								bind:value={settingsMemoryGB}
-								class="w-full"
+								maxGB={maxMemoryGB}
+								{ramBoundaryGB}
 							/>
 						</div>
 					{/if}
@@ -2532,3 +2565,5 @@
 		</div>
 	</div>
 {/if}
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />
