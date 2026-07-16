@@ -1,0 +1,7 @@
+Origin: CraftDeck
+Label: CraftDeck
+Codename: trixie
+Architectures: arm64
+Components: main
+Description: CraftDeck apt repository
+SignWith: BBAB3EAB0E9616B1

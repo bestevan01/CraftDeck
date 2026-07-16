@@ -1,0 +1,103 @@
+name: Release
+
+# Builds the arm64 .deb on every version tag push, publishes it into a
+# reprepro-managed apt repository, and pushes that repository (static
+# Release/Packages/pool files) to the gh-pages branch, which GitHub Pages
+# serves at the custom domain configured in repo Settings -> Pages. This is
+# the whole reason `sudo apt install craftdeck` can work on a fresh
+# Raspberry Pi OS install with no manual repo setup beyond adding this
+# apt source once (see README/requirements.md packaging notes).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+
+      - name: Cross-compile arm64 binary
+        run: |
+          mkdir -p build
+          GOOS=linux GOARCH=arm64 go build -buildvcs=false -o build/craftdeckd ./cmd/craftdeckd
+
+      - name: Install nfpm and reprepro
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          sudo apt-get update && sudo apt-get install -y reprepro
+
+      - name: Fetch Adoptium's signing key
+        # Not committed to the repo (.gitignore'd) since it's fetched fresh
+        # from Adoptium here rather than trusted long-term from git history --
+        # see packaging/nfpm.yaml's postinst comment for why it's bundled
+        # into the .deb at all (FR-42c).
+        run: |
+          curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+            | gpg --dearmor -o packaging/adoptium.gpg
+
+      - name: Determine version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Import repo signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          {
+            echo "allow-loopback-pinentry"
+            echo "allow-preset-passphrase"
+          } >> ~/.gnupg/gpg-agent.conf
+          echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+          gpgconf --kill gpg-agent
+
+          # reprepro shells out to gpg non-interactively to sign the
+          # Release file -- there's no prompt to type the passphrase into
+          # in CI, so pre-load it into gpg-agent's cache via
+          # gpg-preset-passphrase against the signing (primary) key's
+          # keygrip, which is the first one gpg lists.
+          KEYGRIP=$(gpg --list-secret-keys --with-keygrip --keyid-format=long | awk '/Keygrip/{print $3; exit}')
+          PRESET_BIN=$(find /usr/lib* -name gpg-preset-passphrase 2>/dev/null | head -1)
+          "$PRESET_BIN" --preset "$KEYGRIP" <<< "$GPG_PASSPHRASE"
+
+      - name: Build .deb package
+        working-directory: packaging
+        env:
+          ARCH: arm64
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          nfpm package --config nfpm.yaml --packager deb --target ../build/
+
+      - name: Publish into the apt repository
+        run: |
+          reprepro -b packaging/apt-repo includedeb trixie \
+            "build/craftdeck_${{ steps.version.outputs.version }}_arm64.deb"
+          cp packaging/craftdeck-archive-keyring.gpg packaging/apt-repo/craftdeck-archive-keyring.gpg
+
+      - name: Deploy apt repo to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: packaging/apt-repo
+          publish_branch: gh-pages
+          cname: apt.apple-farm.online
