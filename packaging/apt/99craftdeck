@@ -5,6 +5,14 @@
 // killed out from under a still-running world. See that script's own
 // comment for why only Pre-Install-Pkgs (not Pre-Invoke) gets told which
 // packages are actually involved.
-DPkg::Pre-Install-Pkgs {"/usr/share/craftdeck/apt-hook pre";};
-DPkg::Tools::Options::"/usr/share/craftdeck/apt-hook pre"::Version "2";
-DPkg::Post-Invoke {"/usr/share/craftdeck/apt-hook post";};
+// The "[ -x ... ] && ... || true" guard matters for Post-Invoke in
+// particular: when this transaction is removing/purging craftdeck itself,
+// dpkg has already deleted /usr/share/craftdeck/apt-hook (also this
+// package's own file) by the time Post-Invoke runs, since apt loads this
+// config's command line once up front but only executes it after all of
+// dpkg's work is done -- without the guard, apt reports the whole
+// transaction as failed on a plain "file not found" even though the
+// removal itself succeeded (confirmed on real hardware).
+DPkg::Pre-Install-Pkgs {"[ -x /usr/share/craftdeck/apt-hook ] && /usr/share/craftdeck/apt-hook pre || true";};
+DPkg::Tools::Options::"[ -x /usr/share/craftdeck/apt-hook ] && /usr/share/craftdeck/apt-hook pre || true"::Version "2";
+DPkg::Post-Invoke {"[ -x /usr/share/craftdeck/apt-hook ] && /usr/share/craftdeck/apt-hook post || true";};
