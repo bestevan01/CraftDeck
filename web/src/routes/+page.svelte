@@ -165,6 +165,14 @@
 		return 'bg-primary';
 	}
 
+	// Raspberry Pi SoCs start throttling clock speed around 80-85degC, so
+	// that's the destructive threshold here -- 70 is just an early warning.
+	function tempTextClass(tempC: number) {
+		if (tempC >= 80) return 'text-destructive';
+		if (tempC >= 70) return 'text-yellow-500';
+		return '';
+	}
+
 	// The always-on Velocity proxy's version is picked once, at creation,
 	// and never re-checked afterward (see ensureProxyInstance) -- so it can
 	// silently fall behind newer Velocity releases, including ones that add

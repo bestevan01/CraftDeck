@@ -26,6 +26,7 @@ export type Instance = {
 export type SystemResources = {
 	cpu_percent: number;
 	cpu_count: number;
+	cpu_temp_c?: number;
 	total_memory_mb: number;
 	used_memory_mb: number;
 	total_disk_mb: number;

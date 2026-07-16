@@ -20,12 +20,13 @@ import (
 // the memory cap the instance-settings slider needs and the live usage
 // numbers shown on the resource-monitor panel of the instance list page.
 type systemResources struct {
-	CPUPercent    float64 `json:"cpu_percent"`
-	CPUCount      int     `json:"cpu_count"`
-	TotalMemoryMB int     `json:"total_memory_mb"`
-	UsedMemoryMB  int     `json:"used_memory_mb"`
-	TotalDiskMB   int     `json:"total_disk_mb"`
-	UsedDiskMB    int     `json:"used_disk_mb"`
+	CPUPercent    float64  `json:"cpu_percent"`
+	CPUCount      int      `json:"cpu_count"`
+	CPUTempC      *float64 `json:"cpu_temp_c,omitempty"`
+	TotalMemoryMB int      `json:"total_memory_mb"`
+	UsedMemoryMB  int      `json:"used_memory_mb"`
+	TotalDiskMB   int      `json:"total_disk_mb"`
+	UsedDiskMB    int      `json:"used_disk_mb"`
 }
 
 // handleSystemResources reports the Raspberry Pi's current CPU/memory/disk
@@ -49,14 +50,18 @@ func (s *Server) handleSystemResources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, systemResources{
+	resources := systemResources{
 		CPUPercent:    cpuPercent,
 		CPUCount:      runtime.NumCPU(),
 		TotalMemoryMB: totalMemMB,
 		UsedMemoryMB:  usedMemMB,
 		TotalDiskMB:   totalDiskMB,
 		UsedDiskMB:    usedDiskMB,
-	})
+	}
+	if tempC, ok := cpuTempC(); ok {
+		resources.CPUTempC = &tempC
+	}
+	writeJSON(w, http.StatusOK, resources)
 }
 
 // cpuStat holds the two /proc/stat "cpu" line fields we need to derive
@@ -163,6 +168,23 @@ func memoryUsageMB() (totalMB, usedMB int, err error) {
 		return 0, 0, err
 	}
 	return totalKB / 1024, (totalKB - availableKB) / 1024, nil
+}
+
+// cpuTempC reads the SoC temperature from the kernel's thermal sysfs
+// interface (in millidegrees C). Returns ok=false, not an error, when
+// unavailable -- e.g. a developer's Mac, or any non-Pi Linux box without a
+// thermal_zone0 -- since this is a bonus reading the rest of the handler
+// shouldn't fail over.
+func cpuTempC() (float64, bool) {
+	raw, err := os.ReadFile("/sys/class/thermal/thermal_zone0/temp")
+	if err != nil {
+		return 0, false
+	}
+	milliC, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0, false
+	}
+	return float64(milliC) / 1000, true
 }
 
 // diskUsageMB shells out to `df` rather than the raw statfs(2) syscall: the
