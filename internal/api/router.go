@@ -102,6 +102,7 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /api/system/health", s.handleHealth)
 	mux.HandleFunc("GET /api/system/resources", s.handleSystemResources)
+	mux.HandleFunc("GET /api/system/version", s.handleCraftdeckVersion)
 	mux.HandleFunc("GET /api/system/swap", s.handleGetSwap)
 	mux.HandleFunc("PUT /api/system/swap", s.handleSetSwap)
 	mux.HandleFunc("DELETE /api/system/swap", s.handleDeleteSwap)
@@ -113,6 +114,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/password", s.handleChangePassword)
 	mux.HandleFunc("POST /api/auth/2fa/setup", s.handleTOTPSetup)
 	mux.HandleFunc("POST /api/auth/2fa/verify", s.handleTOTPVerify)
+	mux.HandleFunc("POST /api/auth/2fa/disable", s.handleTOTPDisable)
+	mux.HandleFunc("POST /api/auth/2fa/backup-codes/regenerate", s.handleTOTPRegenerateBackupCodes)
 
 	mux.HandleFunc("GET /api/loaders/vanilla/versions", s.handleListVanillaVersions)
 	mux.HandleFunc("GET /api/loaders/paper/versions", s.handleListPaperVersions)

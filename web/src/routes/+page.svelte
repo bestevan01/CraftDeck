@@ -21,6 +21,7 @@
 	import WANWarningModal from '$lib/WANWarningModal.svelte';
 	import MemoryConflictModal from '$lib/MemoryConflictModal.svelte';
 	import CreateInstanceModal from '$lib/CreateInstanceModal.svelte';
+	import UpdateAvailableModal from '$lib/UpdateAvailableModal.svelte';
 	import { onDestroy, onMount } from 'svelte';
 
 	// Shared by every destructive action on this page (see ConfirmDialog.svelte
@@ -155,8 +156,20 @@
 	// FR-34: enabling the toggle only opens the warning modal -- the actual
 	// API call happens in confirmWANEnable once the operator acknowledges
 	// it. Disabling needs no confirmation, so it goes straight through.
+	//
+	// FR-38 also requires 2FA before the backend will actually turn WAN on
+	// (see handleSetNetworkSettings) -- checking that here too, instead of
+	// just letting the toggle fail with a 412 the operator has to notice
+	// buried under the checkbox, sends them straight to where they can fix
+	// it (confirmed as a real point of confusion: an operator without 2FA
+	// set up couldn't tell why the toggle wasn't sticking after a refresh).
 	function onWANToggleChange(enabled: boolean) {
 		if (enabled) {
+			if (!totpEnabled) {
+				networkError = '외부 접속을 켜려면 먼저 2단계 인증을 설정해야 합니다.';
+				openAccountModal();
+				return;
+			}
 			showWANWarningModal = true;
 			return;
 		}
@@ -524,6 +537,22 @@
 		await refreshProxyStatus();
 	}
 
+	// craftdeckd 자신의 새 버전 안내 -- 세션당(페이지 로드당) 한 번만 확인
+	// 하면 충분해서, 인스턴스 목록/리소스처럼 자주 폴링하진 않는다.
+	let showUpdateModal = $state(false);
+	let craftdeckCurrentVersion = $state('');
+	let craftdeckLatestVersion = $state('');
+	async function checkCraftdeckVersion() {
+		try {
+			const v = await api.systemVersion();
+			craftdeckCurrentVersion = v.current_version;
+			craftdeckLatestVersion = v.latest_version ?? '';
+			if (v.update_available) showUpdateModal = true;
+		} catch {
+			// non-critical -- just skip the notice this time
+		}
+	}
+
 	let pollHandle: ReturnType<typeof setInterval>;
 	let resourcePollHandle: ReturnType<typeof setInterval>;
 	onMount(() => {
@@ -533,6 +562,7 @@
 		refreshDomainSettings();
 		refreshSwap();
 		loadMcVersions();
+		checkCraftdeckVersion();
 		api.authStatus().then((s) => {
 			username = s.username;
 			isLoggedIn = s.authenticated;
@@ -994,3 +1024,9 @@
 />
 
 <ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />
+
+<UpdateAvailableModal
+	bind:open={showUpdateModal}
+	currentVersion={craftdeckCurrentVersion}
+	latestVersion={craftdeckLatestVersion}
+/>

@@ -406,3 +406,89 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		"backup_codes": backupCodes,
 	})
 }
+
+type totpDisableRequest struct {
+	Password string `json:"password"`
+}
+
+// handleTOTPDisable turns 2FA off entirely. Requires the current password
+// as re-confirmation, same as handleChangePassword, since this is a
+// security downgrade rather than a routine settings change -- an active
+// session alone isn't proof the person at the keyboard is still the
+// account owner. Also refuses outright while WAN exposure is on: FR-38
+// exists specifically so an operator can't lock themselves out after
+// exposing the panel to the internet, and letting 2FA be turned off while
+// still exposed would defeat that entirely.
+func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	if !user.TOTPEnabled {
+		http.Error(w, "two-factor authentication is not enabled", http.StatusConflict)
+		return
+	}
+
+	var req totpDisableRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if !auth.VerifyPassword(user.PasswordHash, req.Password) {
+		http.Error(w, "password is incorrect", http.StatusUnauthorized)
+		return
+	}
+
+	settings, err := s.networkSettings.Get(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if settings.WANEnabled {
+		http.Error(w, "외부 접속이 켜져 있는 동안은 2단계 인증을 끌 수 없습니다 -- 먼저 외부 접속을 꺼주세요", http.StatusPreconditionFailed)
+		return
+	}
+
+	if err := s.users.DisableTOTP(r.Context(), user.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTOTPRegenerateBackupCodes issues a fresh set of backup codes,
+// invalidating all previous ones -- for an operator who's used most of
+// theirs up, without having to fully turn 2FA off and re-enroll from
+// scratch.
+func (s *Server) handleTOTPRegenerateBackupCodes(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	if !user.TOTPEnabled {
+		http.Error(w, "two-factor authentication is not enabled", http.StatusConflict)
+		return
+	}
+
+	backupCodes, err := auth.GenerateBackupCodes(8)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	hashes := make([]string, len(backupCodes))
+	for i, code := range backupCodes {
+		hash, err := auth.HashPassword(code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		hashes[i] = hash
+	}
+	if err := s.users.SetBackupCodeHashes(r.Context(), user.ID, hashes); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"backup_codes": backupCodes})
+}

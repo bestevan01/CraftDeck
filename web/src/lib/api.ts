@@ -116,6 +116,12 @@ export type ProxyStatus = {
 	update_available: boolean;
 };
 
+export type CraftdeckVersion = {
+	current_version: string;
+	latest_version?: string;
+	update_available: boolean;
+};
+
 // Mirrors internal/network.PortMapping (FR-22~24).
 export type PortMapping = {
 	id: string;
@@ -308,6 +314,10 @@ export const api = {
 	setupTOTP: () => req<TOTPSetup>('/api/auth/2fa/setup', { method: 'POST' }),
 	verifyTOTP: (code: string) =>
 		req<TOTPVerifyResult>('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }),
+	disableTOTP: (password: string) =>
+		req<void>('/api/auth/2fa/disable', { method: 'POST', body: JSON.stringify({ password }) }),
+	regenerateBackupCodes: () =>
+		req<{ backup_codes: string[] }>('/api/auth/2fa/backup-codes/regenerate', { method: 'POST' }),
 	changePassword: (username: string, currentPassword: string, newPassword: string) =>
 		req<void>('/api/auth/password', {
 			method: 'POST',
@@ -370,6 +380,7 @@ export const api = {
 			body: JSON.stringify(updates)
 		}),
 	systemResources: () => req<SystemResources>('/api/system/resources'),
+	systemVersion: () => req<CraftdeckVersion>('/api/system/version'),
 	listVanillaVersions: () => req<VanillaVersion[]>('/api/loaders/vanilla/versions'),
 	listPaperVersions: () => req<string[]>('/api/loaders/paper/versions'),
 	listPurpurVersions: () => req<string[]>('/api/loaders/purpur/versions'),

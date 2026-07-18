@@ -44,10 +44,20 @@ jobs:
           npm --prefix web ci
           npm --prefix web run build
 
+      - name: Determine version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Cross-compile arm64 binary
+        # -X bakes the tag version into internal/version.Version, which
+        # handleCraftdeckVersion compares against the apt repo's Packages
+        # index to tell the UI when an update is available -- without this
+        # every build would report itself as "dev" and never match.
         run: |
           mkdir -p build
-          GOOS=linux GOARCH=arm64 go build -buildvcs=false -o build/craftdeckd ./cmd/craftdeckd
+          GOOS=linux GOARCH=arm64 go build -buildvcs=false \
+            -ldflags "-X craftdeck/internal/version.Version=${{ steps.version.outputs.version }}" \
+            -o build/craftdeckd ./cmd/craftdeckd
 
       - name: Install nfpm and reprepro
         run: |
@@ -62,10 +72,6 @@ jobs:
         run: |
           curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
             | gpg --dearmor -o packaging/adoptium.gpg
-
-      - name: Determine version
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Import repo signing key
         env:

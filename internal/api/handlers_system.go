@@ -14,7 +14,72 @@ import (
 	"time"
 
 	"craftdeck/internal/swap"
+	"craftdeck/internal/version"
 )
+
+// craftdeckAptPackagesURL is our own apt repository's package index for the
+// architecture this daemon actually runs on (Raspberry Pi 4/5 are both
+// arm64) -- checking it directly (rather than e.g. GitHub's releases API)
+// means "update available" here always matches exactly what
+// `apt update && apt upgrade craftdeck` would do, since it's the same file
+// apt itself resolves against.
+const craftdeckAptPackagesURL = "https://apt.apple-farm.online/dists/trixie/main/binary-arm64/Packages"
+
+type craftdeckVersionResponse struct {
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version,omitempty"`
+	UpdateAvailable bool   `json:"update_available"`
+}
+
+// handleCraftdeckVersion reports craftdeckd's own version against the
+// newest one published to the apt repository, so the UI can surface an
+// "update available" notice the same way it already does for the Velocity
+// proxy (handleGetProxyStatus). Unlike that one, a fetch failure here isn't
+// fatal to the response -- it's a nice-to-have notice, not something
+// callers are blocked on, so update_available just stays false.
+func (s *Server) handleCraftdeckVersion(w http.ResponseWriter, r *http.Request) {
+	resp := craftdeckVersionResponse{CurrentVersion: version.Version}
+	if latest, err := fetchLatestCraftdeckVersion(r.Context()); err == nil {
+		resp.LatestVersion = latest
+		resp.UpdateAvailable = latest != "" && latest != version.Version
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// fetchLatestCraftdeckVersion parses the "Version:" field out of the
+// craftdeck stanza in our apt repository's Packages index.
+func fetchLatestCraftdeckVersion(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, craftdeckAptPackagesURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d fetching apt Packages index", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	inCraftdeckStanza := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case line == "Package: craftdeck":
+			inCraftdeckStanza = true
+		case line == "":
+			inCraftdeckStanza = false
+		case inCraftdeckStanza && strings.HasPrefix(line, "Version: "):
+			return strings.TrimPrefix(line, "Version: "), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("craftdeck package not found in apt Packages index")
+}
 
 // systemResources is the payload for GET /api/system/resources: covers both
 // the memory cap the instance-settings slider needs and the live usage

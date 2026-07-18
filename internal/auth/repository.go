@@ -233,6 +233,28 @@ func (r *Repository) EnableTOTP(ctx context.Context, userID int64, backupCodeHas
 	return err
 }
 
+// DisableTOTP turns 2FA off entirely, clearing the secret and any unused
+// backup codes -- callers are responsible for re-confirming the account's
+// password and checking WAN exposure is off first (see handleTOTPDisable);
+// this just does the actual state change.
+func (r *Repository) DisableTOTP(ctx context.Context, userID int64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET totp_enabled = 0, totp_secret = '', backup_codes_json = NULL WHERE id = ?`, userID)
+	return err
+}
+
+// SetBackupCodeHashes replaces an already-enabled account's backup codes
+// (the "regenerate" path, for an operator who's used most of theirs up)
+// without touching totp_enabled/totp_secret.
+func (r *Repository) SetBackupCodeHashes(ctx context.Context, userID int64, backupCodeHashes []string) error {
+	encoded, err := json.Marshal(backupCodeHashes)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, `UPDATE users SET backup_codes_json = ? WHERE id = ?`, encoded, userID)
+	return err
+}
+
 // ConsumeBackupCode implements FR-39's recovery path: checks code (already
 // known to be a plausible backup code, not a 6-digit TOTP one -- see
 // handleLogin) against every stored hash, and if one matches, removes it
