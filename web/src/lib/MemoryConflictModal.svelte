@@ -60,7 +60,7 @@
 								{item.name}
 								{#if item.isTarget}<span class="text-muted-foreground">(시작 예정)</span>
 								{:else if item.isRunning}<span class="text-muted-foreground"
-										>(실행 중 -- 변경 시 자동으로 재시작됩니다)</span
+										>(실행 중, 변경 시 자동으로 재시작됩니다)</span
 									>{/if}
 							</span>
 							<span>{item.memoryGB}GB</span>

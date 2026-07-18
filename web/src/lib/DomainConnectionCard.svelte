@@ -48,7 +48,7 @@
 	{#if domainConfig}
 		<p class="mt-2 text-xs">
 			<strong>{domainConfig.kind === 'main_domain' ? '메인 도메인' : '무료 DDNS'}</strong>
-			연결됨 -- {domainConfig.hostname} ({domainConfig.provider})
+			연결됨: {domainConfig.hostname} ({domainConfig.provider})
 		</p>
 		{#if domainConfig.kind === 'free_subdomain'}
 			{#if domainConfig.mode === 'monitor'}
@@ -58,7 +58,7 @@
 				</p>
 				{#if domainConfig.mismatch_detected}
 					<p class="text-destructive mt-1 text-xs">
-						⚠ 이 호스트명이 현재 공인 IP와 일치하지 않습니다 -- 공유기의 ipTime DDNS 기능이 꺼졌거나
+						⚠ 이 호스트명이 현재 공인 IP와 일치하지 않습니다. 공유기의 ipTime DDNS 기능이 꺼졌거나
 						실패했을 수 있습니다.
 					</p>
 				{/if}

@@ -35,7 +35,7 @@
 			onclick={(e) => e.stopPropagation()}
 		>
 			<h2 class="mb-3 text-sm font-semibold">
-				{reasonModalKind === 'kick' ? '강제 퇴장' : '밴'} 사유 선택 -- {playerName}
+				{reasonModalKind === 'kick' ? '강제 퇴장' : '밴'} 사유 선택 ({playerName})
 			</h2>
 			<div class="mb-3 flex flex-col gap-1.5">
 				{#each reasonPresets as preset}

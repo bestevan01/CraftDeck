@@ -62,7 +62,7 @@
 		</p>
 	{:else if networkSettings?.wan_enabled && networkSettings.manual_info}
 		<div class="border-border bg-background mt-2 rounded-md border p-3 text-xs">
-			<p class="mb-1 font-medium">자동 등록에 실패했습니다 -- 공유기에서 직접 설정하세요:</p>
+			<p class="mb-1 font-medium">자동 등록에 실패했습니다. 공유기에서 직접 설정하세요:</p>
 			<p>내부 IP: {networkSettings.manual_info.local_ip}</p>
 			<p>포트: {networkSettings.manual_info.internal_port}</p>
 			<p>프로토콜: {networkSettings.manual_info.protocol.toUpperCase()}</p>

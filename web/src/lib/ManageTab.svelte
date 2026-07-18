@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Backup, BuildInfo, DomainConfig, Instance, NetworkAddresses, WorldInfo } from '$lib/api';
 	import MemorySlider from '$lib/MemorySlider.svelte';
+	import CopyButton from '$lib/CopyButton.svelte';
 
 	let {
 		inst,
@@ -148,17 +149,6 @@
 		return forcedHost;
 	}
 
-	// 접속 주소 복사 버튼 클릭 시 잠깐 "복사됨"으로 바뀌는 로컬 UI 상태 --
-	// 다른 곳에서 참조하지 않아 이 컴포넌트 안에 완전히 가둬둘 수 있다.
-	let copiedAddress = $state('');
-	function copyAddress(address: string) {
-		navigator.clipboard.writeText(address).then(() => {
-			copiedAddress = address;
-			setTimeout(() => {
-				if (copiedAddress === address) copiedAddress = '';
-			}, 1500);
-		});
-	}
 </script>
 
 <div class="border-border bg-card rounded-lg border p-4">
@@ -262,12 +252,7 @@
 						<p class="text-muted-foreground text-xs">{domainAddressLabel}</p>
 						<code class="text-sm">{domainAddress}</code>
 					</div>
-					<button
-						class="border-border shrink-0 rounded-md border px-2 py-1 text-xs"
-						onclick={() => copyAddress(domainAddress)}
-					>
-						{copiedAddress === domainAddress ? '복사됨' : '복사'}
-					</button>
+					<CopyButton text={domainAddress} />
 				</div>
 			{/if}
 			<div class="flex items-center justify-between gap-2">
@@ -275,12 +260,7 @@
 					<p class="text-muted-foreground text-xs">사설 IP (같은 네트워크에서)</p>
 					<code class="text-sm">{localAddress}</code>
 				</div>
-				<button
-					class="border-border shrink-0 rounded-md border px-2 py-1 text-xs"
-					onclick={() => copyAddress(localAddress)}
-				>
-					{copiedAddress === localAddress ? '복사됨' : '복사'}
-				</button>
+				<CopyButton text={localAddress} />
 			</div>
 			{#if publicAddress}
 				<div class="flex items-center justify-between gap-2">
@@ -288,12 +268,7 @@
 						<p class="text-muted-foreground text-xs">공인 IP (외부에서)</p>
 						<code class="text-sm">{publicAddress}</code>
 					</div>
-					<button
-						class="border-border shrink-0 rounded-md border px-2 py-1 text-xs"
-						onclick={() => copyAddress(publicAddress)}
-					>
-						{copiedAddress === publicAddress ? '복사됨' : '복사'}
-					</button>
+					<CopyButton text={publicAddress} />
 				</div>
 			{:else if domainConfig}
 				<p class="text-muted-foreground text-xs">도메인이 연결되어 있어 공인 IP 대신 위 주소를 사용하세요.</p>
@@ -388,7 +363,7 @@
 		<h2 class="font-medium">프록시</h2>
 		{#if inst.loader === 'fabric' || inst.loader === 'neoforge'}
 			<p class="mt-1 text-xs text-yellow-500">
-				⚠ 일부 모드(엔티티·블록 상태 등 바닐라 패킷 구조 자체를 변형하는 모드 -- 예: Create)는
+				⚠ 일부 모드(엔티티·블록 상태 등 바닐라 패킷 구조 자체를 변형하는 모드, 예: Create)는
 				Velocity와 호환되지 않아 접속 중 "A packet did not decode successfully" 오류로 끊길 수
 				있습니다. 이런 모드를 쓴다면 프록시 등록 대신 독립 노출을 사용하세요.
 			</p>
@@ -404,7 +379,7 @@
 			</p>
 			<p class="text-muted-foreground mt-1 text-xs">
 				수동으로 등록하려면, 이 서버가 실제로 Velocity의 모던 포워딩(공유 시크릿)을 신뢰하도록
-				<strong>직접 설정되어 있어야 합니다</strong> -- CraftDeck은 임의의 구동기 jar가 이걸
+				<strong>직접 설정되어 있어야 합니다</strong>. CraftDeck은 임의의 구동기 jar가 이걸
 				지원하는지 확인할 방법이 없습니다. 잘못 설정된 채로 등록하면 접속이 실패합니다.
 			</p>
 			<button
@@ -421,7 +396,7 @@
 			{#if registeredSecret}
 				<div class="border-border bg-background mt-2 rounded-md border p-2">
 					<p class="text-muted-foreground text-xs">
-						등록됐습니다. 아래 시크릿을 이 서버의 forwarding 설정(로더에 따라 다름 -- 파일 탭에서
+						등록됐습니다. 아래 시크릿을 이 서버의 forwarding 설정(로더에 따라 다름, 파일 탭에서
 						직접 편집)에 붙여넣고, <code>server-ip</code>/<code>online-mode</code>는 이미 자동으로
 						반영했습니다. 재시작 후 적용됩니다.
 					</p>

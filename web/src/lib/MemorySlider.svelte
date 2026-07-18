@@ -30,7 +30,7 @@
 		<div
 			class="pointer-events-none absolute top-1/2 h-3 w-0.5 -translate-y-1/2 bg-yellow-500"
 			style="left: {boundaryPercent}%"
-			title="물리 RAM 한도 -- 이 지점부터는 스왑(디스크)을 씁니다"
+			title="물리 RAM 한도: 이 지점부터는 스왑(디스크)을 씁니다"
 		></div>
 	{/if}
 </div>

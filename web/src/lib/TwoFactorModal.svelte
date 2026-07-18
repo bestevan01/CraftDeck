@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import { untrack } from 'svelte';
+	import CopyButton from '$lib/CopyButton.svelte';
 
 	// FR-38/39: 2단계 인증 등록/현황 -- 계정 설정 모달과 분리된 별도 모달로,
 	// 그 모달의 버튼에서 열린다.
@@ -195,12 +196,15 @@
 				{/if}
 			{:else if totpBackupCodes}
 				<p class="text-sm">
-					설정 완료됐습니다. 아래 백업 코드를 안전한 곳에 저장하세요 -- 다시 볼 수 없습니다.
+					설정 완료됐습니다. 아래 백업 코드를 안전한 곳에 저장하세요. 다시 볼 수 없습니다.
 				</p>
 				<div class="border-border bg-background mt-2 grid grid-cols-2 gap-1 rounded-md border p-3">
 					{#each totpBackupCodes as code (code)}
 						<code class="text-xs">{code}</code>
 					{/each}
+				</div>
+				<div class="mt-2 flex justify-end">
+					<CopyButton text={totpBackupCodes.join('\n')} label="모두 복사" />
 				</div>
 			{:else if startingTOTPSetup}
 				<p class="text-muted-foreground text-sm">준비 중...</p>

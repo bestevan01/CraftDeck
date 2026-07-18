@@ -39,7 +39,7 @@
 	{:else if swapInfo}
 		<p class="mt-2 text-xs">
 			{#if swapInfo.enabled}
-				<span class="text-green-500">켜짐</span> -- {(swapInfo.size_mb / 1024).toFixed(1)}GB 중 {(
+				<span class="text-green-500">켜짐</span>: {(swapInfo.size_mb / 1024).toFixed(1)}GB 중 {(
 					swapInfo.used_mb / 1024
 				).toFixed(1)}GB 사용 중
 			{:else if swapInfo.size_mb > 0}

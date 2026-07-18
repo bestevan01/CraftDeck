@@ -37,15 +37,23 @@ systemctl restart systemd-journald
 
 # 5. Surface the admin URL right away -- otherwise the operator has no way
 #    to know the service is even reachable, let alone at what address,
-#    right after `apt install craftdeck` finishes. hostname -I's first
-#    entry is the primary LAN IP on a typical single-NIC Raspberry Pi
-#    setup; falls back to "<라즈베리파이-IP>" if that lookup ever comes up
-#    empty (e.g. no network yet) rather than printing a blank address.
-LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-echo ""
-echo "CraftDeck가 설치되어 실행 중입니다."
-echo "관리 페이지 접속: http://${LOCAL_IP:-<라즈베리파이-IP>}:8080"
-echo "처음 접속하면 관리자 계정을 만드는 화면이 나옵니다."
-echo ""
+#    right after `apt install craftdeck` finishes. Only on a fresh install,
+#    though: dpkg calls postinst as `configure <old-version>`, where $2 is
+#    empty on first install and the previous version on an upgrade -- an
+#    operator running `apt upgrade craftdeck` already knows the URL and
+#    already has an admin account, so repeating this every upgrade would
+#    just be noise (confirmed: that's exactly what was happening).
+#    hostname -I's first entry is the primary LAN IP on a typical
+#    single-NIC Raspberry Pi setup; falls back to "<라즈베리파이-IP>" if
+#    that lookup ever comes up empty (e.g. no network yet) rather than
+#    printing a blank address.
+if [ -z "$2" ]; then
+	LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+	echo ""
+	echo "CraftDeck가 설치되어 실행 중입니다."
+	echo "관리 페이지 접속: http://${LOCAL_IP:-<라즈베리파이-IP>}:8080"
+	echo "처음 접속하면 관리자 계정을 만드는 화면이 나옵니다."
+	echo ""
+fi
 
 exit 0
