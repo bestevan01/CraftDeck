@@ -381,6 +381,7 @@ export const api = {
 		}),
 	systemResources: () => req<SystemResources>('/api/system/resources'),
 	systemVersion: () => req<CraftdeckVersion>('/api/system/version'),
+	updateCraftdeck: () => req<void>('/api/system/update', { method: 'POST' }),
 	listVanillaVersions: () => req<VanillaVersion[]>('/api/loaders/vanilla/versions'),
 	listPaperVersions: () => req<string[]>('/api/loaders/paper/versions'),
 	listPurpurVersions: () => req<string[]>('/api/loaders/purpur/versions'),

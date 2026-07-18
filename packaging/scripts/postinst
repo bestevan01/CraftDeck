@@ -25,10 +25,24 @@ chown craftdeck:craftdeck /var/lib/craftdeck /etc/craftdeck
 #    has to happen *before* the outer transaction starts for apt to be able
 #    to resolve these Depends at all.
 
-# 3. Enable and start the service so the daemon is running immediately
-#    after install, with no extra steps required from the user (FR-43).
+# 3. Enable and (re)start the service. On a fresh install this just starts
+#    it (FR-43, no extra steps required from the user). On an upgrade,
+#    `enable --now` alone is *not* enough: dpkg replaces the on-disk binary
+#    with an atomic rename, so the already-running process keeps executing
+#    the old inode entirely unaffected -- `start` on an already-active unit
+#    is a no-op, so without an explicit restart here, `apt upgrade
+#    craftdeck` would silently keep the previous version running in memory
+#    until the next manual restart or reboot (confirmed: that's exactly
+#    what was happening -- the very bug this restart fixes is also why
+#    craftdeckd can safely trigger its own upgrade from the web UI, see
+#    handleUpdateCraftdeck).
 systemctl daemon-reload
-systemctl enable --now craftdeck.service
+systemctl enable craftdeck.service
+if [ -z "$2" ]; then
+	systemctl start craftdeck.service
+else
+	systemctl restart craftdeck.service
+fi
 
 # 4. Apply the console log retention/rotation policy (FR-16,
 #    /etc/systemd/journald.conf.d/craftdeck.conf) immediately -- journald

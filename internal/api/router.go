@@ -103,6 +103,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/system/health", s.handleHealth)
 	mux.HandleFunc("GET /api/system/resources", s.handleSystemResources)
 	mux.HandleFunc("GET /api/system/version", s.handleCraftdeckVersion)
+	mux.HandleFunc("POST /api/system/update", s.handleUpdateCraftdeck)
 	mux.HandleFunc("GET /api/system/swap", s.handleGetSwap)
 	mux.HandleFunc("PUT /api/system/swap", s.handleSetSwap)
 	mux.HandleFunc("DELETE /api/system/swap", s.handleDeleteSwap)

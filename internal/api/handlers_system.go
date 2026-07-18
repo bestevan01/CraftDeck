@@ -46,6 +46,28 @@ func (s *Server) handleCraftdeckVersion(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleUpdateCraftdeck triggers `apt upgrade craftdeck` in the background
+// and returns immediately -- it can't run the upgrade inline and wait for
+// it to finish, since that upgrade replaces and restarts craftdeckd itself
+// (see postinst's restart-on-upgrade step), which would kill the very
+// process handling this HTTP request partway through and never send a
+// response. systemd-run detaches the apt-get invocation into its own
+// transient unit, independent of craftdeckd's process tree, so it survives
+// the restart it triggers. The frontend is expected to poll
+// /api/system/version afterward (tolerating a few seconds of connection
+// refused while the restart happens) and reload once it succeeds again.
+func (s *Server) handleUpdateCraftdeck(w http.ResponseWriter, r *http.Request) {
+	cmd := exec.Command("systemd-run",
+		"--unit=craftdeck-selfupdate",
+		"--collect",
+		"/bin/sh", "-c", "apt-get update && apt-get install --only-upgrade -y craftdeck")
+	if err := cmd.Run(); err != nil {
+		http.Error(w, fmt.Sprintf("failed to start update: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
 // fetchLatestCraftdeckVersion parses the "Version:" field out of the
 // craftdeck stanza in our apt repository's Packages index.
 func fetchLatestCraftdeckVersion(ctx context.Context) (string, error) {
