@@ -1,5 +1,6 @@
 Origin: CraftDeck
 Label: CraftDeck
+Suite: beta
 Codename: trixie
 Architectures: arm64
 Components: main
