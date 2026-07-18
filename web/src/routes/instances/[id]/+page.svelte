@@ -88,6 +88,21 @@
 		return loaderLabels[loader] ?? loader;
 	}
 
+	// Matches the labels used on the instance list page (+page.svelte's
+	// statusLabel) -- inst.status is the backend's raw English state and
+	// was being shown to the operator verbatim here.
+	function statusLabel(status: Instance['status']) {
+		return (
+			{
+				stopped: '중지됨',
+				starting: '시작 중',
+				running: '실행 중',
+				stopping: '종료 중',
+				crashed: '비정상 종료'
+			}[status] ?? status
+		);
+	}
+
 	// Mirrors supportsVelocityForwarding in internal/api/handlers_proxy.go --
 	// Purpur/Folia/Pufferfish/Leaf are Paper forks that carry proxies.velocity
 	// forward unchanged, and Fabric gets there via an auto-installed
@@ -1191,7 +1206,7 @@
 			<h1 class="mt-1 text-2xl font-semibold">{inst?.name ?? id}</h1>
 			{#if inst}
 				<p class="text-muted-foreground text-xs">
-					{loaderLabel(inst.loader)} · {inst.mc_version} · 상태 {inst.status}
+					{loaderLabel(inst.loader)} · {inst.mc_version} · 상태 {statusLabel(inst.status)}
 					{#if inst.kind === 'proxy'}
 						· 접속 포트 {inst.game_port}
 					{:else if subdomain && !subdomain.registered}

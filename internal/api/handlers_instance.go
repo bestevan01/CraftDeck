@@ -838,7 +838,7 @@ func (s *Server) stopInstanceCore(ctx context.Context, inst *instance.Instance) 
 
 // tryGracefulStop sends "stop" over the managed RCON connection and waits
 // briefly for the unit to exit on its own. Returns false if RCON wasn't
-// reachable or the unit was still active after the wait, signaling the
+// reachable or the connection was still up after the wait, signaling the
 // caller to fall back to supervisor.Stop.
 func (s *Server) tryGracefulStop(ctx context.Context, inst *instance.Instance) bool {
 	if inst.RCONPort == 0 {
@@ -848,11 +848,21 @@ func (s *Server) tryGracefulStop(ctx context.Context, inst *instance.Instance) b
 		return false
 	}
 
+	// Polls the managed RCON connection's own state rather than shelling
+	// out to `systemctl is-active` every second -- that used to race
+	// against systemd tearing down the just-exited transient unit file,
+	// logging a harmless but noisy "Failed to open .../transient/....
+	// service: No such file or directory" into the instance's own journal
+	// (confirmed: an operator watching the live console saw exactly this,
+	// repeated, right after a clean shutdown). The RCON connection drops
+	// the moment the process exits, so this is both quieter and faster.
 	for i := 0; i < 30; i++ { // up to ~30s for world save + shutdown
 		time.Sleep(1 * time.Second)
-		active, _ := s.supervisor.IsActive(ctx, inst.ID)
-		if !active {
-			return true
+		if !s.rconMgr.Connected(inst.ID) {
+			// One systemd query to confirm, now that the noisy window
+			// (unit exiting *right this instant*) has already passed.
+			active, _ := s.supervisor.IsActive(ctx, inst.ID)
+			return !active
 		}
 	}
 	return false

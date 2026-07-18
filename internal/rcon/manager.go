@@ -80,6 +80,27 @@ func (m *Manager) Execute(instanceID, command string) (string, error) {
 	return mc.execute(command)
 }
 
+// Connected reports whether instanceID currently has a live RCON client --
+// a cheap, in-process signal that the server process is (still) up, without
+// spawning a `systemctl` subprocess. Used to detect a graceful shutdown
+// finishing instead of polling systemctl is-active in a loop, which was
+// racing against systemd tearing down the just-exited transient unit and
+// logging a harmless but noisy "Failed to open .../transient/....service:
+// No such file or directory" into that same unit's own journal every time
+// (confirmed on real hardware -- an operator watching the live console saw
+// it repeated right after a clean stop).
+func (m *Manager) Connected(instanceID string) bool {
+	m.mu.Lock()
+	mc, ok := m.conns[instanceID]
+	m.mu.Unlock()
+	if !ok {
+		return false
+	}
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	return mc.client != nil
+}
+
 func (mc *managedConn) execute(command string) (string, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
