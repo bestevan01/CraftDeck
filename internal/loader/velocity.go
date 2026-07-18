@@ -28,3 +28,11 @@ func FetchLatestBuildableVelocityVersion(ctx context.Context) (string, error) {
 func (VelocityAdapter) Download(ctx context.Context, velocityVersion string, destDir string) (string, error) {
 	return fillDownload(ctx, velocityAPIBase, velocityVersion, destDir)
 }
+
+// FetchVelocityJavaMinimum returns the minimum Java major a given Velocity
+// version declares needing (per the fill API's per-version metadata), and
+// false if that couldn't be determined -- callers should fall back to a
+// safe default rather than block installation on this being unavailable.
+func FetchVelocityJavaMinimum(ctx context.Context, velocityVersion string) (int, bool) {
+	return fillVersionJavaMinimum(ctx, velocityAPIBase, velocityVersion)
+}

@@ -41,6 +41,26 @@ func MajorForMCVersion(mcVersion string) (int, error) {
 	}
 }
 
+// installedMajors are the Temurin JREs packaging/scripts/postinst
+// provisions, oldest first -- kept in sync with that list by hand rather
+// than probed at runtime, since nothing else in this codebase queries
+// installed JVMs dynamically either.
+var installedMajors = []int{8, 17, 21, 25}
+
+// NearestInstalledMajor returns the smallest installed Java major that
+// satisfies a "minimum required" version (e.g. Velocity's own fill-API
+// metadata, see loader.FetchVelocityJavaMinimum) -- falls back to the
+// newest installed major if even that isn't enough, on the theory that
+// trying the newest available beats refusing to start at all.
+func NearestInstalledMajor(minimum int) int {
+	for _, m := range installedMajors {
+		if m >= minimum {
+			return m
+		}
+	}
+	return installedMajors[len(installedMajors)-1]
+}
+
 // BinaryPath returns the java executable for the given major version.
 //
 // VERIFIED against a real install: `apt-get install temurin-21-jre` on

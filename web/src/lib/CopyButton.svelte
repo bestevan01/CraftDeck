@@ -17,12 +17,43 @@
 	let showCopied = $state(false);
 	let hideTimeout: ReturnType<typeof setTimeout>;
 
+	function flashCopied() {
+		showCopied = true;
+		clearTimeout(hideTimeout);
+		hideTimeout = setTimeout(() => (showCopied = false), 2500);
+	}
+
+	// navigator.clipboard only exists in a secure context (HTTPS or
+	// localhost) -- CraftDeck serves plain HTTP over LAN whenever WAN
+	// exposure is off (FR-33), so on a typical LAN-only setup that API is
+	// simply undefined and silently threw before this fallback existed
+	// (confirmed: that's exactly why backup-code copying looked like it
+	// did nothing). The old execCommand path still works over plain HTTP.
+	function legacyCopy(value: string) {
+		const textarea = document.createElement('textarea');
+		textarea.value = value;
+		textarea.style.position = 'fixed';
+		textarea.style.opacity = '0';
+		document.body.appendChild(textarea);
+		textarea.focus();
+		textarea.select();
+		try {
+			document.execCommand('copy');
+		} finally {
+			document.body.removeChild(textarea);
+		}
+	}
+
 	function copy() {
-		navigator.clipboard.writeText(text).then(() => {
-			showCopied = true;
-			clearTimeout(hideTimeout);
-			hideTimeout = setTimeout(() => (showCopied = false), 2500);
-		});
+		if (navigator.clipboard && window.isSecureContext) {
+			navigator.clipboard.writeText(text).then(flashCopied, () => {
+				legacyCopy(text);
+				flashCopied();
+			});
+		} else {
+			legacyCopy(text);
+			flashCopied();
+		}
 	}
 </script>
 

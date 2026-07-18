@@ -22,6 +22,8 @@
 		onSearch: (e: SubmitEvent) => void;
 		onInstall: (projectId: string) => void;
 	} = $props();
+
+	let pressedBackdrop = false;
 </script>
 
 {#if open}
@@ -29,7 +31,10 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-8"
-		onclick={() => (open = false)}
+		onmousedown={(e) => (pressedBackdrop = e.target === e.currentTarget)}
+		onclick={(e) => {
+			if (pressedBackdrop && e.target === e.currentTarget) open = false;
+		}}
 		onkeydown={(e) => {
 			if (e.key === 'Escape') open = false;
 		}}
@@ -38,7 +43,6 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="bg-card border-border flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border p-4 shadow-lg"
-			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="mb-3 flex items-center justify-between">
 				<h2 class="font-medium">Modrinth에서 {loaderLabel} 검색</h2>

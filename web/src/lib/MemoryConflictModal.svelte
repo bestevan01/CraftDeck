@@ -30,6 +30,8 @@
 		applying: boolean;
 		onApply: () => void;
 	} = $props();
+
+	let pressedBackdrop = false;
 </script>
 
 {#if open}
@@ -37,14 +39,14 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-8"
-		onclick={() => (open = false)}
+		onmousedown={(e) => (pressedBackdrop = e.target === e.currentTarget)}
+		onclick={(e) => {
+			if (pressedBackdrop && e.target === e.currentTarget) open = false;
+		}}
 	>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="bg-card border-border w-full max-w-md rounded-lg border p-4 shadow-lg"
-			onclick={(e) => e.stopPropagation()}
-		>
+		<div class="bg-card border-border w-full max-w-md rounded-lg border p-4 shadow-lg">
 			<h2 class="font-medium">메모리 할당 조정 필요</h2>
 			<p class="text-muted-foreground mt-1 text-xs">
 				실행하려는 서버들의 메모리 할당 합이 {ramBoundaryGB < maxGB

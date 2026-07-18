@@ -389,6 +389,20 @@
 	}
 
 	function openCreateForm() {
+		form = {
+			name: '',
+			loader: 'vanilla',
+			mc_version: '',
+			loader_version: '',
+			memory_gb: 2,
+			cpu_quota_percent: 0,
+			accept_eula: false,
+			expose_independently: false
+		};
+		customLoaderName = '';
+		worldFile = null;
+		worldFileForce = false;
+		createError = '';
 		showCreateForm = true;
 	}
 

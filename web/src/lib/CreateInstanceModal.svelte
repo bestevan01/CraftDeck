@@ -63,6 +63,8 @@
 		onWorldFileChange: (e: Event) => void;
 		onSubmit: () => void;
 	} = $props();
+
+	let pressedBackdrop = false;
 </script>
 
 {#if open}
@@ -70,7 +72,17 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-		onclick={() => (open = false)}
+		onmousedown={(e) => {
+			// Only close when the *press* also started on the backdrop
+			// itself -- otherwise selecting text (or dragging a slider) that
+			// starts inside the dialog and happens to release outside it
+			// closes the whole thing, which isn't what "click outside"
+			// should mean (confirmed: that's exactly what was happening).
+			pressedBackdrop = e.target === e.currentTarget;
+		}}
+		onclick={(e) => {
+			if (pressedBackdrop && e.target === e.currentTarget) open = false;
+		}}
 		onkeydown={(e) => {
 			if (e.key === 'Escape') open = false;
 		}}
@@ -79,7 +91,6 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="border-border bg-card max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border p-4 shadow-lg"
-			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="mb-3 flex items-center justify-between">
 				<h2 class="font-medium">서버 만들기</h2>

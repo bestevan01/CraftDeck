@@ -30,6 +30,8 @@
 	function enumOptionLabel(settingKey: string, value: string) {
 		return enumOptionLabels[settingKey]?.[value] ?? value;
 	}
+
+	let pressedBackdrop = false;
 </script>
 
 {#if open}
@@ -37,7 +39,10 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-8"
-		onclick={onClose}
+		onmousedown={(e) => (pressedBackdrop = e.target === e.currentTarget)}
+		onclick={(e) => {
+			if (pressedBackdrop && e.target === e.currentTarget) onClose();
+		}}
 		onkeydown={(e) => {
 			if (e.key === 'Escape') onClose();
 		}}
@@ -46,7 +51,6 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="bg-card border-border flex max-h-[80vh] w-full max-w-2xl flex-col rounded-lg border p-4 shadow-lg"
-			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="mb-1 flex shrink-0 items-center justify-between">
 				<h2 class="font-medium">게임플레이 설정</h2>

@@ -15,6 +15,7 @@ import (
 	"craftdeck/internal/ddns"
 	"craftdeck/internal/dns"
 	"craftdeck/internal/instance"
+	"craftdeck/internal/javaruntime"
 	"craftdeck/internal/loader"
 	"craftdeck/internal/modrinth"
 	"craftdeck/internal/network"
@@ -30,6 +31,27 @@ import (
 // so the per-server memory slider (see handleCreateInstance/handleUpdateInstance)
 // can reliably reserve it off the top and offer the rest to servers.
 const proxyMemoryMaxMB = 1024
+
+// proxyDefaultJavaMajor is used when the fill API's per-version Java
+// requirement can't be determined (network hiccup, field missing) -- this
+// only needs to be "recent enough for most Velocity releases", since a real
+// mismatch just means a slower failure (crash on launch) rather than a
+// silent one, the same as before this lookup existed at all.
+const proxyDefaultJavaMajor = 21
+
+// proxyJavaMajor asks the fill API which Java major a given Velocity
+// version actually requires and maps it to the nearest one CraftDeck has
+// installed, falling back to proxyDefaultJavaMajor if that lookup fails --
+// see loader.FetchVelocityJavaMinimum's doc comment for why this can't just
+// be hardcoded once and forgotten (Velocity 4.0.0 bumped the requirement to
+// Java 25, breaking the "21 is enough" assumption this used to make).
+func proxyJavaMajor(ctx context.Context, velocityVersion string) int {
+	minimum, ok := loader.FetchVelocityJavaMinimum(ctx, velocityVersion)
+	if !ok {
+		return proxyDefaultJavaMajor
+	}
+	return javaruntime.NearestInstalledMajor(minimum)
+}
 
 // ensureProxyInstance returns CraftDeck's singleton Velocity proxy,
 // creating and provisioning one (newest stable Velocity version, lowest
@@ -86,9 +108,13 @@ func (s *Server) ensureProxyInstance(ctx context.Context) (*instance.Instance, e
 		Kind:      instance.KindProxy,
 		Loader:    "velocity",
 		MCVersion: latestVersion,
-		// Velocity 3.x requires Java 17+; 21 is what CraftDeck already
-		// installs and uses as its own modern default elsewhere.
-		JavaMajor:   21,
+		// A hardcoded Java major used to live here ("21 is enough") --
+		// confirmed on real hardware that it isn't: Velocity 4.0.0 requires
+		// Java 25 and crashes on launch with UnsupportedClassVersionError
+		// under 21, so this now asks the fill API what the *actual* build
+		// needs and falls back to CraftDeck's newest installed Temurin if
+		// that lookup itself fails (better to try than refuse to start).
+		JavaMajor:   proxyJavaMajor(ctx, latestVersion),
 		GamePort:    port,
 		WorkDir:     filepath.Join(s.dataDir, "instances", id),
 		Status:      instance.StatusStopped,
@@ -865,11 +891,13 @@ func (s *Server) handleUpgradeProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.instances.UpdateVersion(ctx, proxy.ID, latest); err != nil {
+	javaMajor := proxyJavaMajor(ctx, latest)
+	if err := s.instances.UpdateVersion(ctx, proxy.ID, latest, javaMajor); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	proxy.MCVersion = latest
+	proxy.JavaMajor = javaMajor
 
 	if err := s.startInstanceCore(ctx, proxy); err != nil {
 		http.Error(w, fmt.Sprintf("restart proxy after upgrade (jar was already replaced -- retry starting it manually): %v", err), http.StatusInternalServerError)

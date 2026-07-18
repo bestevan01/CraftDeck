@@ -16,6 +16,8 @@
 	} = $props();
 
 	const reasonPresets = ['비매너/욕설', '핵/치트 사용', '광고/스팸 행위', '규칙 위반', '사유 없음'];
+
+	let pressedBackdrop = false;
 </script>
 
 {#if reasonModalKind}
@@ -23,17 +25,17 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-		onclick={onClose}
+		onmousedown={(e) => (pressedBackdrop = e.target === e.currentTarget)}
+		onclick={(e) => {
+			if (pressedBackdrop && e.target === e.currentTarget) onClose();
+		}}
 		onkeydown={(e) => {
 			if (e.key === 'Escape') onClose();
 		}}
 	>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="bg-card border-border w-full max-w-sm rounded-lg border p-4 shadow-lg"
-			onclick={(e) => e.stopPropagation()}
-		>
+		<div class="bg-card border-border w-full max-w-sm rounded-lg border p-4 shadow-lg">
 			<h2 class="mb-3 text-sm font-semibold">
 				{reasonModalKind === 'kick' ? '강제 퇴장' : '밴'} 사유 선택 ({playerName})
 			</h2>

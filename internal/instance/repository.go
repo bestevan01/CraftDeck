@@ -80,12 +80,15 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, gamePort, rc
 	return err
 }
 
-// UpdateVersion records a new mc_version after an instance's jar has been
-// replaced in place (currently only used to upgrade the singleton Velocity
-// proxy -- see handleUpgradeProxy -- since every other instance's version
-// is fixed at creation and changed by recreating it instead).
-func (r *Repository) UpdateVersion(ctx context.Context, id, mcVersion string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE instances SET mc_version = ? WHERE id = ?`, mcVersion, id)
+// UpdateVersion records a new mc_version (and the Java major it needs to
+// run under -- see loader.FetchVelocityJavaMinimum, since a Velocity major
+// upgrade can bump this) after an instance's jar has been replaced in
+// place (currently only used to upgrade the singleton Velocity proxy --
+// see handleUpgradeProxy -- since every other instance's version is fixed
+// at creation and changed by recreating it instead).
+func (r *Repository) UpdateVersion(ctx context.Context, id, mcVersion string, javaMajor int) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE instances SET mc_version = ?, java_major = ? WHERE id = ?`, mcVersion, javaMajor, id)
 	return err
 }
 

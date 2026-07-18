@@ -98,6 +98,48 @@ func fillLatestBuildableVersion(ctx context.Context, apiBase string) (string, er
 	return "", fmt.Errorf("no buildable version found under %s", apiBase)
 }
 
+// fillVersionJavaMinimum fetches a single version's own metadata (not its
+// builds list) and returns the minimum Java major it declares needing, if
+// the fill API includes that field for this project. Confirmed against
+// Velocity's project: 3.4.0 -> 17, 3.5.1 -> 21, 4.0.0 -> 25 -- a real jump
+// in Java requirement between major Velocity versions, not just noise.
+// Callers that pick a fixed Java version to launch a build with (e.g.
+// ensureProxyInstance) need this instead of guessing, since guessing wrong
+// crashes the process on startup with UnsupportedClassVersionError rather
+// than failing anywhere it'd be caught earlier (confirmed on real
+// hardware: exactly this crash, from a hardcoded "Java 21 is enough"
+// assumption that Velocity 4.0.0 broke).
+func fillVersionJavaMinimum(ctx context.Context, apiBase, version string) (int, bool) {
+	var body struct {
+		Version struct {
+			Java struct {
+				Version struct {
+					Minimum int `json:"minimum"`
+				} `json:"version"`
+			} `json:"java"`
+		} `json:"version"`
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/versions/%s", apiBase, version), nil)
+	if err != nil {
+		return 0, false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, false
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return 0, false
+	}
+	if body.Version.Java.Version.Minimum <= 0 {
+		return 0, false
+	}
+	return body.Version.Java.Version.Minimum, true
+}
+
 type fillBuild struct {
 	ID        int    `json:"id"`
 	Channel   string `json:"channel"` // "STABLE", "BETA", or "ALPHA"

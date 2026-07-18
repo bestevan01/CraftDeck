@@ -66,6 +66,8 @@
 		savingFileContent: boolean;
 		onSaveFileContent: () => void;
 	} = $props();
+
+	let pressedBackdrop = false;
 </script>
 
 <div class="border-border bg-card rounded-lg border p-4">
@@ -183,13 +185,15 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-8"
-		onclick={onCloseFileEditor}
+		onmousedown={(e) => (pressedBackdrop = e.target === e.currentTarget)}
+		onclick={(e) => {
+			if (pressedBackdrop && e.target === e.currentTarget) onCloseFileEditor();
+		}}
 	>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="bg-card border-border flex max-h-[80vh] w-full max-w-2xl flex-col rounded-lg border p-4 shadow-lg"
-			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="mb-2 flex items-center justify-between">
 				<h2 class="truncate font-medium">{editingFile}</h2>
