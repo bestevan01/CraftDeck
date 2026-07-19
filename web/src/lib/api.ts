@@ -21,6 +21,7 @@ export type Instance = {
 	work_dir: string;
 	status: InstanceStatus;
 	created_at: string;
+	proxy_opt_out: boolean;
 };
 
 export type SystemResources = {
@@ -212,7 +213,17 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 		if (res.status === 401 && !path.startsWith('/api/auth/')) {
 			window.location.href = '/login';
 		}
-		throw new Error(text || `${res.status} ${res.statusText}`);
+		// craftdeckd's own handlers always write a plain-text error body.
+		// An HTML body means this response never reached craftdeckd at all
+		// -- e.g. a reverse proxy's own 502 page while the service is
+		// mid-restart (self-update, apt upgrade) -- so dumping it verbatim
+		// would show the user a full raw HTML document instead of a
+		// message. Confirmed on real hardware during a self-update.
+		const contentType = res.headers.get('content-type') ?? '';
+		const message = contentType.includes('html')
+			? `서버에 일시적으로 연결할 수 없습니다 (${res.status})`
+			: text || `${res.status} ${res.statusText}`;
+		throw new Error(message);
 	}
 	if (res.status === 204) return undefined as T;
 	const contentType = res.headers.get('content-type') ?? '';

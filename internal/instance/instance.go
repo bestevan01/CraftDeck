@@ -39,4 +39,11 @@ type Instance struct {
 	WorkDir         string    `json:"work_dir"`
 	Status          Status    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
+	// ProxyOptOut is true once an operator has explicitly converted this
+	// server to independent exposure (see handlers_proxy.go's
+	// unregisterServerFromProxyCore) -- distinct from "never registered
+	// yet". ReconcileProxyMode checks this before auto-registering a
+	// not-currently-behind-the-proxy server, so it doesn't silently undo
+	// that choice on every daemon restart.
+	ProxyOptOut bool `json:"proxy_opt_out"`
 }

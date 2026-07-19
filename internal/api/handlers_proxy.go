@@ -1122,6 +1122,12 @@ func (s *Server) registerServerBehindProxyCore(ctx context.Context, inst *instan
 	// for files that already existed and were already owned correctly (e.g.
 	// Paper's paper-global.yml edited in place).
 	chownInstanceFile(ctx, inst.ID, inst.WorkDir)
+	// An explicit (re-)registration always clears any earlier opt-out --
+	// see unregisterServerFromProxyCore and the Instance.ProxyOptOut doc
+	// comment.
+	if err := s.instances.SetProxyOptOut(ctx, inst.ID, false); err != nil {
+		log.Printf("register %s behind proxy: clear proxy_opt_out (continuing anyway): %v", inst.ID, err)
+	}
 	return secret, nil
 }
 
@@ -1136,6 +1142,14 @@ func (s *Server) registerServerBehindProxyCore(ctx context.Context, inst *instan
 func (s *Server) unregisterServerFromProxyCore(ctx context.Context, inst *instance.Instance) error {
 	if err := s.removeServerFromProxy(ctx, inst.ID); err != nil {
 		return err
+	}
+	// This is an explicit "go independent" choice by the operator, not a
+	// transient/unregistered state -- record it so ReconcileProxyMode
+	// (daemon startup, domain registration changes) doesn't silently
+	// re-register this server the next time it runs. See the
+	// Instance.ProxyOptOut doc comment.
+	if err := s.instances.SetProxyOptOut(ctx, inst.ID, true); err != nil {
+		log.Printf("unregister %s from proxy: set proxy_opt_out (continuing anyway): %v", inst.ID, err)
 	}
 	return s.revertServerProxySettings(ctx, inst)
 }
@@ -1347,6 +1361,14 @@ func (s *Server) ReconcileProxyMode(ctx context.Context) error {
 	if hasMainDomain {
 		for _, inst := range list {
 			if inst.Kind != instance.KindServer || !supportsVelocityForwardingForVersion(ctx, inst.Loader, inst.MCVersion) {
+				continue
+			}
+			// An operator who explicitly converted this server to
+			// independent exposure (unregisterServerFromProxyCore) made a
+			// deliberate choice, not just "hasn't been registered yet" --
+			// don't silently undo it on every daemon restart (e.g. after a
+			// self-update). See the Instance.ProxyOptOut doc comment.
+			if inst.ProxyOptOut {
 				continue
 			}
 			_, registered, err := s.serverSubdomain(ctx, inst.ID)
