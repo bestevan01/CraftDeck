@@ -12,6 +12,7 @@ import (
 	"craftdeck/internal/auth"
 	"craftdeck/internal/backup"
 	"craftdeck/internal/ddns"
+	"craftdeck/internal/hardware"
 	"craftdeck/internal/instance"
 	"craftdeck/internal/network"
 	"craftdeck/internal/plugin"
@@ -49,6 +50,11 @@ type Server struct {
 	// masterKey encrypts DDNS provider tokens at rest (FR-31,
 	// internal/secrets) -- loaded once at startup from config.MasterKeyPath.
 	masterKey []byte
+
+	// hardwareSettings/benchmarkRunner back the Active Cooler detection +
+	// overclock feature (internal/hardware) -- see handlers_hardware.go.
+	hardwareSettings *hardware.Repository
+	benchmarkRunner  *hardware.BenchmarkRunner
 }
 
 func NewServer(
@@ -66,22 +72,26 @@ func NewServer(
 	domains *ddns.Repository,
 	ddnsManager *ddns.Manager,
 	masterKey []byte,
+	hardwareSettings *hardware.Repository,
+	benchmarkRunner *hardware.BenchmarkRunner,
 ) *Server {
 	return &Server{
-		instances:       instances,
-		supervisor:      supervisor,
-		rconMgr:         rconMgr,
-		users:           users,
-		backups:         backups,
-		plugins:         plugins,
-		dataDir:         dataDir,
-		networkSettings: networkSettings,
-		portMappings:    portMappings,
-		domains:         domains,
-		ddnsManager:     ddnsManager,
-		netManager:      netManager,
-		webUIPort:       webUIPort,
-		masterKey:       masterKey,
+		instances:        instances,
+		supervisor:       supervisor,
+		rconMgr:          rconMgr,
+		users:            users,
+		backups:          backups,
+		plugins:          plugins,
+		dataDir:          dataDir,
+		networkSettings:  networkSettings,
+		portMappings:     portMappings,
+		domains:          domains,
+		ddnsManager:      ddnsManager,
+		netManager:       netManager,
+		webUIPort:        webUIPort,
+		masterKey:        masterKey,
+		hardwareSettings: hardwareSettings,
+		benchmarkRunner:  benchmarkRunner,
 	}
 }
 
@@ -107,6 +117,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/system/swap", s.handleGetSwap)
 	mux.HandleFunc("PUT /api/system/swap", s.handleSetSwap)
 	mux.HandleFunc("DELETE /api/system/swap", s.handleDeleteSwap)
+
+	mux.HandleFunc("GET /api/system/hardware", s.handleGetHardware)
+	mux.HandleFunc("POST /api/system/hardware/redetect", s.handleRedetectCooler)
+	mux.HandleFunc("PUT /api/system/overclock", s.handleSetOverclock)
+	mux.HandleFunc("POST /api/system/overclock/reboot", s.handleRebootForOverclock)
+	mux.HandleFunc("POST /api/system/overclock/benchmark", s.handleStartBenchmark)
+	mux.HandleFunc("GET /api/system/overclock/benchmark/status", s.handleBenchmarkStatus)
 
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/setup", s.handleSetup)

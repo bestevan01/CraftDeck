@@ -26,6 +26,7 @@ import (
 	"craftdeck/internal/config"
 	"craftdeck/internal/db"
 	"craftdeck/internal/ddns"
+	"craftdeck/internal/hardware"
 	"craftdeck/internal/instance"
 	"craftdeck/internal/network"
 	"craftdeck/internal/plugin"
@@ -69,6 +70,8 @@ func run() error {
 	portMappings := network.NewMappingRepository(database)
 	netManager := network.NewManager(portMappings)
 	domains := ddns.NewRepository(database)
+	hardwareSettings := hardware.NewRepository(database)
+	benchmarkRunner := hardware.NewBenchmarkRunner()
 	masterKey, err := secrets.LoadOrCreateMasterKey(cfg.MasterKeyPath)
 	if err != nil {
 		return fmt.Errorf("load/create master key: %w", err)
@@ -78,7 +81,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("determine web UI port from %q: %w", cfg.ListenAddr, err)
 	}
-	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey)
+	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey, hardwareSettings, benchmarkRunner)
 	// FR-28/30: wired up after apiServer exists (ddnsManager is built first
 	// since api.NewServer takes it as a constructor argument) -- see
 	// ddns.Manager.SetMainDomainSync's doc comment.
@@ -93,6 +96,25 @@ func run() error {
 	// commands stopped working until the user manually restarted it).
 	if err := reconcileInstances(context.Background(), instances, supervisor, rconMgr); err != nil {
 		log.Printf("instance reconciliation failed (continuing anyway): %v", err)
+	}
+
+	// Active Cooler detection spins the fan up as part of the test (see
+	// hardware.DetectActiveCooler), so it must only ever run once per
+	// install -- cooler_checked_at (NULL until this succeeds) is the flag
+	// that makes this a one-shot: a fresh install and the first restart
+	// after upgrading to a build with this feature both naturally hit it
+	// once, and every later restart skips it.
+	if hw, err := hardwareSettings.Get(context.Background()); err != nil {
+		log.Printf("read hardware settings failed (continuing anyway): %v", err)
+	} else if hw.CoolerCheckedAt == nil {
+		detected, err := hardware.DetectActiveCooler(context.Background())
+		if err != nil {
+			log.Printf("active cooler detection failed (continuing anyway): %v", err)
+		} else if err := hardwareSettings.SetCoolerDetected(context.Background(), detected); err != nil {
+			log.Printf("save active cooler detection result failed (continuing anyway): %v", err)
+		} else {
+			log.Printf("active cooler detection: detected=%v", detected)
+		}
 	}
 
 	// FR-1f: Velocity only exists/runs when an owned domain is registered

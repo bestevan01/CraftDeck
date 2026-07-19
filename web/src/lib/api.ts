@@ -172,6 +172,45 @@ export type SwapInfo = {
 	free_disk_mb: number;
 };
 
+// Mirrors internal/hardware.Config -- Active Cooler detection result plus
+// the current overclock config and last benchmark outcome, all one
+// singleton row. cooler_detected gates whether the overclock card renders
+// at all (see +page.svelte); the backend enforces the same gate on
+// PUT /api/system/overclock independently of what the UI shows.
+export type HardwareInfo = {
+	cooler_detected: boolean;
+	cooler_checked_at?: string;
+	overclock_enabled: boolean;
+	overclock_preset: string;
+	overclock_arm_freq?: number;
+	overclock_over_voltage?: number;
+	overclock_applied_at?: string;
+	last_benchmark_result: '' | 'pass' | 'fail';
+	last_benchmark_at?: string;
+};
+
+// Mirrors internal/hardware.BenchmarkStatus -- polled while the stability
+// self-test (internal/hardware.RunBenchmark) is running.
+export type BenchmarkStatus = {
+	running: boolean;
+	elapsed_sec: number;
+	total_sec: number;
+	temp_c: number;
+	result: '' | 'pass' | 'fail';
+	under_voltage_detected: boolean;
+	throttled_detected: boolean;
+};
+
+// Mirrors hardware.Presets -- kept in sync by hand since it's a short,
+// rarely-changed list; not worth a round trip just to render four radio
+// options.
+export const OVERCLOCK_PRESETS = [
+	{ name: 'default', label: '기본값', arm_freq_mhz: 2400, over_voltage: 0 },
+	{ name: 'safe', label: '안전', arm_freq_mhz: 2600, over_voltage: 3 },
+	{ name: 'medium', label: '보통', arm_freq_mhz: 2800, over_voltage: 6 },
+	{ name: 'high', label: '높음', arm_freq_mhz: 3000, over_voltage: 8 }
+] as const;
+
 // Mirrors internal/ddns.Config -- whether an owned domain or only a free
 // DDNS subdomain is registered decides whether Velocity runs at all
 // (FR-1f). mode/last_known_ip/last_checked_at/mismatch_detected only carry
@@ -471,6 +510,23 @@ export const api = {
 	setSwap: (sizeMB: number) =>
 		req<SwapInfo>('/api/system/swap', { method: 'PUT', body: JSON.stringify({ size_mb: sizeMB }) }),
 	deleteSwap: () => req<{ ok: boolean }>('/api/system/swap', { method: 'DELETE' }),
+	// Active Cooler 감지 + 오버클럭 (internal/hardware) -- 감지 결과가 없으면
+	// setOverclock 자체가 서버에서 403으로 거부된다.
+	getHardware: () => req<HardwareInfo>('/api/system/hardware'),
+	redetectCooler: () => req<HardwareInfo>('/api/system/hardware/redetect', { method: 'POST' }),
+	setOverclock: (enabled: boolean, preset: string, armFreqMHz: number, overVoltage: number) =>
+		req<HardwareInfo>('/api/system/overclock', {
+			method: 'PUT',
+			body: JSON.stringify({
+				enabled,
+				preset,
+				arm_freq_mhz: armFreqMHz,
+				over_voltage: overVoltage
+			})
+		}),
+	rebootForOverclock: () => req<void>('/api/system/overclock/reboot', { method: 'POST' }),
+	startBenchmark: () => req<void>('/api/system/overclock/benchmark', { method: 'POST' }),
+	getBenchmarkStatus: () => req<BenchmarkStatus>('/api/system/overclock/benchmark/status'),
 	// FR-21/22/23/25: "외부 접속 허용" toggle (web UI + every reachable game
 	// port) + UPnP/NAT-PMP automation.
 	getNetworkSettings: () => req<NetworkSettings>('/api/network/settings'),

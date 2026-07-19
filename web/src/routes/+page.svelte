@@ -9,13 +9,17 @@
 		type NetworkSettings,
 		type PortMapping,
 		type DomainConfig,
-		type SwapInfo
+		type SwapInfo,
+		type HardwareInfo,
+		type BenchmarkStatus,
+		OVERCLOCK_PRESETS
 	} from '$lib/api';
 	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
 	import AccountModal from '$lib/AccountModal.svelte';
 	import VelocityProxyCard from '$lib/VelocityProxyCard.svelte';
 	import ExternalAccessCard from '$lib/ExternalAccessCard.svelte';
 	import SwapCard from '$lib/SwapCard.svelte';
+	import OverclockCard from '$lib/OverclockCard.svelte';
 	import DomainConnectionCard from '$lib/DomainConnectionCard.svelte';
 	import ResourcePanel from '$lib/ResourcePanel.svelte';
 	import WANWarningModal from '$lib/WANWarningModal.svelte';
@@ -271,6 +275,113 @@
 		} finally {
 			swapSaving = false;
 		}
+	}
+
+	// Active Cooler 감지 + 오버클럭 (internal/hardware) -- cooler_detected가
+	// false면 카드 안의 조작부는 숨기고 "다시 감지"만 노출한다.
+	let hardwareInfo = $state<HardwareInfo | null>(null);
+	let hardwareFetchError = $state('');
+	let redetectingCooler = $state(false);
+	let overclockForm = $state({ preset: '__none__', armFreq: '2600', overVoltage: '3' });
+	let overclockSaving = $state(false);
+	let overclockError = $state('');
+	let overclockRebooting = $state(false);
+	let benchmarkStatus = $state<BenchmarkStatus | null>(null);
+	let benchmarkStarting = $state(false);
+	let benchmarkPollHandle: ReturnType<typeof setInterval> | undefined;
+
+	async function refreshHardware() {
+		try {
+			hardwareInfo = await api.getHardware();
+			hardwareFetchError = '';
+			if (hardwareInfo.overclock_enabled && hardwareInfo.overclock_preset) {
+				overclockForm.preset = hardwareInfo.overclock_preset;
+			}
+			if (hardwareInfo.overclock_arm_freq) overclockForm.armFreq = String(hardwareInfo.overclock_arm_freq);
+			if (hardwareInfo.overclock_over_voltage !== undefined)
+				overclockForm.overVoltage = String(hardwareInfo.overclock_over_voltage);
+		} catch (err) {
+			hardwareFetchError = err instanceof Error ? err.message : String(err);
+		}
+	}
+
+	async function redetectCooler() {
+		redetectingCooler = true;
+		try {
+			hardwareInfo = await api.redetectCooler();
+		} catch (err) {
+			hardwareFetchError = err instanceof Error ? err.message : String(err);
+		} finally {
+			redetectingCooler = false;
+		}
+	}
+
+	async function applyOverclock() {
+		overclockSaving = true;
+		overclockError = '';
+		try {
+			const enabled = overclockForm.preset !== '__none__';
+			let armFreq = Number(overclockForm.armFreq);
+			let overVoltage = Number(overclockForm.overVoltage);
+			const preset = OVERCLOCK_PRESETS.find((p) => p.name === overclockForm.preset);
+			if (preset) {
+				armFreq = preset.arm_freq_mhz;
+				overVoltage = preset.over_voltage;
+			}
+			const presetName = overclockForm.preset === 'custom' || overclockForm.preset === '__none__' ? '' : overclockForm.preset;
+			hardwareInfo = await api.setOverclock(enabled, presetName, armFreq, overVoltage);
+		} catch (err) {
+			overclockError = err instanceof Error ? err.message : String(err);
+		} finally {
+			overclockSaving = false;
+		}
+	}
+
+	// 벤치마크가 FAIL을 감지한 시점엔 이미 그 불안정한 오버클럭이 부팅 때
+	// 적용돼서 지금 이 순간 실행 중인 상태라, config.txt만 안전값으로
+	// 되돌려서는 부족하다 -- 재부팅까지 같이 해야 실제로 안전해진다.
+	async function revertOverclock() {
+		overclockForm.preset = '__none__';
+		await applyOverclock();
+		if (!overclockError) await rebootForOverclock();
+	}
+
+	async function rebootForOverclock() {
+		overclockRebooting = true;
+		try {
+			await api.rebootForOverclock();
+		} catch (err) {
+			overclockError = err instanceof Error ? err.message : String(err);
+			overclockRebooting = false;
+		}
+		// craftdeckd's process is about to die along with the whole machine --
+		// there's no "poll until it comes back" here like the self-update flow,
+		// since the Pi itself is rebooting, not just the service. The operator
+		// just has to wait and refresh.
+	}
+
+	async function startBenchmark() {
+		benchmarkStarting = true;
+		try {
+			await api.startBenchmark();
+			pollBenchmarkStatus();
+		} catch (err) {
+			overclockError = err instanceof Error ? err.message : String(err);
+		} finally {
+			benchmarkStarting = false;
+		}
+	}
+
+	function pollBenchmarkStatus() {
+		clearInterval(benchmarkPollHandle);
+		benchmarkPollHandle = setInterval(async () => {
+			try {
+				benchmarkStatus = await api.getBenchmarkStatus();
+				if (!benchmarkStatus.running) clearInterval(benchmarkPollHandle);
+			} catch {
+				clearInterval(benchmarkPollHandle);
+			}
+		}, 2000);
 	}
 
 	// FR-26 minimal skeleton + FR-1f: whether an owned domain is registered
@@ -630,6 +741,11 @@
 		refreshProxyStatus();
 		refreshDomainSettings();
 		refreshSwap();
+		refreshHardware();
+		api.getBenchmarkStatus().then((s) => {
+			benchmarkStatus = s;
+			if (s.running) pollBenchmarkStatus();
+		});
 		loadMcVersions();
 		checkCraftdeckVersion();
 		api.authStatus().then((s) => {
@@ -648,6 +764,7 @@
 	onDestroy(() => {
 		clearInterval(pollHandle);
 		clearInterval(resourcePollHandle);
+		clearInterval(benchmarkPollHandle);
 	});
 
 	async function createInstance() {
@@ -1072,6 +1189,23 @@
 					onDisable={disableSwap}
 				/>
 			{/if}
+
+			<OverclockCard
+				{hardwareInfo}
+				{hardwareFetchError}
+				redetecting={redetectingCooler}
+				onRedetect={redetectCooler}
+				bind:overclockForm
+				{overclockSaving}
+				{overclockError}
+				onApplyOverclock={applyOverclock}
+				rebooting={overclockRebooting}
+				onReboot={rebootForOverclock}
+				{benchmarkStatus}
+				{benchmarkStarting}
+				onStartBenchmark={startBenchmark}
+				onRevertOverclock={revertOverclock}
+			/>
 
 			<DomainConnectionCard
 				{domainConfig}
