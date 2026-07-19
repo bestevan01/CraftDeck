@@ -289,6 +289,7 @@
 	let benchmarkStatus = $state<BenchmarkStatus | null>(null);
 	let benchmarkStarting = $state(false);
 	let benchmarkPollHandle: ReturnType<typeof setInterval> | undefined;
+	let overclockRebootPollHandle: ReturnType<typeof setInterval> | undefined;
 
 	async function refreshHardware() {
 		try {
@@ -337,15 +338,70 @@
 		}
 	}
 
+	// 서버가 실행 중인 상태로 재부팅하면 정상 종료 절차 없이 강제로
+	// 죽는 셈이라, 재부팅이 필요한 모든 경로(적용/되돌리기)에서 공통으로
+	// 거치는 안전장치: 실행 중인 인스턴스가 있으면 경고 후 동의를 받고,
+	// 각각에 종료 명령을 보내 실제로 멈출 때까지 기다린 다음에야 진행한다.
+	async function waitForInstancesStopped(ids: string[], timeoutMs = 90_000) {
+		const deadline = Date.now() + timeoutMs;
+		while (Date.now() < deadline) {
+			const current = await api.listInstances();
+			const stillRunning = current.filter((i) => ids.includes(i.id) && i.status !== 'stopped');
+			if (stillRunning.length === 0) return;
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+		}
+		throw new Error('서버 종료 대기 시간이 초과됐습니다. 인스턴스 상태를 확인한 뒤 다시 시도해주세요.');
+	}
+
+	async function applyAndRebootNow() {
+		await applyOverclock();
+		if (overclockError) {
+			overclockSaving = false;
+			return;
+		}
+		await rebootForOverclock();
+	}
+
+	// "적용"과 "재부팅해서 적용"을 하나로 합친 진입점 -- 실행 중인 인스턴스가
+	// 있으면 그대로 재부팅하지 않고 먼저 경고 모달로 동의를 구한다.
+	function requestOverclockReboot() {
+		const running = instances.filter((i) => i.status === 'running');
+		if (running.length === 0) {
+			applyAndRebootNow();
+			return;
+		}
+		const names = running.map((i) => i.name).join(', ');
+		askConfirm(
+			`다음 서버가 실행 중입니다: ${names}\n재부팅 전에 먼저 각 서버를 안전하게 종료합니다. 계속할까요?`,
+			async () => {
+				overclockSaving = true;
+				overclockError = '';
+				try {
+					await Promise.all(running.map((i) => api.stopInstance(i.id)));
+					await waitForInstancesStopped(running.map((i) => i.id));
+				} catch (err) {
+					overclockError = err instanceof Error ? err.message : String(err);
+					overclockSaving = false;
+					return;
+				}
+				await applyAndRebootNow();
+			}
+		);
+	}
+
 	// 벤치마크가 FAIL을 감지한 시점엔 이미 그 불안정한 오버클럭이 부팅 때
 	// 적용돼서 지금 이 순간 실행 중인 상태라, config.txt만 안전값으로
 	// 되돌려서는 부족하다 -- 재부팅까지 같이 해야 실제로 안전해진다.
-	async function revertOverclock() {
+	function revertOverclock() {
 		overclockForm.preset = '__none__';
-		await applyOverclock();
-		if (!overclockError) await rebootForOverclock();
+		requestOverclockReboot();
 	}
 
+	// 서비스 재시작(자기 프로세스만 죽었다 다시 뜸)과 달리 재부팅은 기기
+	// 전체가 몇십 초간 완전히 내려갔다 올라오므로, 자가 업데이트 폴링과
+	// 같은 모양이되 훨씬 긴 데드라인을 쓴다. 트리거 직후의 요청은 아직
+	// 재부팅이 실제로 시작되기 전이라 우연히 성공할 수 있어, 한 번이라도
+	// 실패(= 실제로 내려감)를 관찰한 뒤에 온 성공만 "복귀"로 인정한다.
 	async function rebootForOverclock() {
 		overclockRebooting = true;
 		try {
@@ -353,11 +409,34 @@
 		} catch (err) {
 			overclockError = err instanceof Error ? err.message : String(err);
 			overclockRebooting = false;
+			overclockSaving = false;
+			return;
 		}
-		// craftdeckd's process is about to die along with the whole machine --
-		// there's no "poll until it comes back" here like the self-update flow,
-		// since the Pi itself is rebooting, not just the service. The operator
-		// just has to wait and refresh.
+		overclockSaving = false;
+		pollUntilRebooted();
+	}
+
+	function pollUntilRebooted() {
+		clearInterval(overclockRebootPollHandle);
+		const deadline = Date.now() + 240_000;
+		let sawDown = false;
+		overclockRebootPollHandle = setInterval(async () => {
+			if (Date.now() > deadline) {
+				clearInterval(overclockRebootPollHandle);
+				overclockRebooting = false;
+				overclockError = '재부팅 후 응답이 없습니다. 잠시 후 페이지를 직접 새로고침해보세요.';
+				return;
+			}
+			try {
+				await api.systemVersion();
+				if (sawDown) {
+					clearInterval(overclockRebootPollHandle);
+					window.location.reload();
+				}
+			} catch {
+				sawDown = true;
+			}
+		}, 3000);
 	}
 
 	async function startBenchmark() {
@@ -765,6 +844,7 @@
 		clearInterval(pollHandle);
 		clearInterval(resourcePollHandle);
 		clearInterval(benchmarkPollHandle);
+		clearInterval(overclockRebootPollHandle);
 	});
 
 	async function createInstance() {
@@ -1198,9 +1278,8 @@
 				bind:overclockForm
 				{overclockSaving}
 				{overclockError}
-				onApplyOverclock={applyOverclock}
+				onApplyOverclock={requestOverclockReboot}
 				rebooting={overclockRebooting}
-				onReboot={rebootForOverclock}
 				{benchmarkStatus}
 				{benchmarkStarting}
 				onStartBenchmark={startBenchmark}

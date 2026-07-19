@@ -15,7 +15,6 @@
 		overclockError,
 		onApplyOverclock,
 		rebooting,
-		onReboot,
 		benchmarkStatus,
 		benchmarkStarting,
 		onStartBenchmark,
@@ -30,7 +29,6 @@
 		overclockError: string;
 		onApplyOverclock: () => void;
 		rebooting: boolean;
-		onReboot: () => void;
 		benchmarkStatus: BenchmarkStatus | null;
 		benchmarkStarting: boolean;
 		onStartBenchmark: () => void;
@@ -41,8 +39,9 @@
 <div class="border-border bg-card rounded-lg border p-4">
 	<h2 class="font-medium">오버클럭</h2>
 	<p class="text-muted-foreground mt-1 text-xs">
-		공식 Active Cooler가 실제로 장착된 게 확인된 경우에만 사용할 수 있습니다. 값을 적용한 뒤에는
-		재부팅해야 반영되고, 안정성 테스트로 언더볼트/쓰로틀링 없이 동작하는지 직접 확인할 수 있습니다.
+		공식 Active Cooler가 실제로 장착된 게 확인된 경우에만 사용할 수 있습니다. 적용하면 곧바로
+		재부팅까지 진행되며(실행 중인 서버는 먼저 안전하게 종료됩니다), 이후 안정성 테스트로
+		언더볼트/쓰로틀링 없이 동작하는지 직접 확인할 수 있습니다.
 	</p>
 
 	{#if hardwareFetchError}
@@ -117,11 +116,16 @@
 
 		<button
 			class="bg-primary text-primary-foreground mt-2 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-			disabled={overclockSaving}
+			disabled={overclockSaving || rebooting}
 			onclick={onApplyOverclock}
 		>
-			{overclockSaving ? '적용 중...' : '적용'}
+			{rebooting ? '재부팅 중...' : overclockSaving ? '적용 중...' : '적용 후 재부팅'}
 		</button>
+		{#if rebooting}
+			<p class="text-muted-foreground mt-2 text-xs">
+				재부팅 중입니다. 완료되면 자동으로 새로고침됩니다.
+			</p>
+		{/if}
 		{#if overclockError}
 			<p class="text-destructive mt-2 text-xs">{overclockError}</p>
 		{/if}
@@ -129,19 +133,8 @@
 		{#if hardwareInfo.overclock_enabled}
 			<p class="text-muted-foreground mt-2 text-xs">
 				현재 적용됨: arm_freq={hardwareInfo.overclock_arm_freq}MHz, over_voltage_delta={hardwareInfo.overclock_over_voltage_delta}µV
-				(재부팅 후 반영)
 			</p>
 		{/if}
-
-		<div class="border-border mt-3 border-t pt-3">
-			<button
-				class="border-border rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
-				disabled={rebooting}
-				onclick={onReboot}
-			>
-				{rebooting ? '재부팅 중...' : '지금 재부팅해서 적용'}
-			</button>
-		</div>
 
 		<div class="border-border mt-3 border-t pt-3">
 			<h3 class="text-sm font-medium">안정성 테스트</h3>
@@ -172,7 +165,7 @@
 					</p>
 					<button
 						class="border-border text-destructive mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
-						disabled={overclockSaving}
+						disabled={overclockSaving || rebooting}
 						onclick={onRevertOverclock}
 					>
 						안전한 값으로 되돌리기
