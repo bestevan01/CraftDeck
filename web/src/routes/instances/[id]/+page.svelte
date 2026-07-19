@@ -27,6 +27,7 @@
 	import FilesTab from '$lib/FilesTab.svelte';
 	import ConsoleTab from '$lib/ConsoleTab.svelte';
 	import { onDestroy, onMount, tick } from 'svelte';
+	import { replaceState } from '$app/navigation';
 
 	// Shared by every destructive action on this page (see ConfirmDialog.svelte
 	// for why this replaced the browser's native confirm()).
@@ -46,7 +47,32 @@
 	// most often) kept getting pushed further down the page. Splitting them
 	// into tabs means the console tab's height/layout is never affected by
 	// how much content the other tabs have.
-	let activeTab = $state<'console' | 'manage' | 'plugins' | 'files'>('console');
+	// URL의 ?tab= 쿼리에 반영해서, 새로고침해도 보고 있던 탭 그대로 돌아오게
+	// 한다 (메인 페이지의 인스턴스/설정 탭과 같은 패턴).
+	function validTab(v: string | null): 'console' | 'manage' | 'plugins' | 'files' {
+		return v === 'manage' || v === 'plugins' || v === 'files' ? v : 'console';
+	}
+	let activeTab = $state<'console' | 'manage' | 'plugins' | 'files'>(
+		validTab($page.url.searchParams.get('tab'))
+	);
+	function setActiveTab(tab: 'console' | 'manage' | 'plugins' | 'files') {
+		activeTab = tab;
+		const url = new URL(window.location.href);
+		if (tab === 'console') {
+			url.searchParams.delete('tab');
+		} else {
+			url.searchParams.set('tab', tab);
+		}
+		replaceState(url, {});
+	}
+	// URL에서 읽은 탭이 이 인스턴스에 없는 탭일 수도 있다 (예: proxy
+	// 인스턴스인데 ?tab=files, 업로드 미지원 로더인데 ?tab=plugins) --
+	// 인스턴스 정보가 로드된 뒤 한 번 걸러서 콘솔로 되돌린다.
+	$effect(() => {
+		if (!inst) return;
+		if (activeTab === 'files' && inst.kind !== 'server') setActiveTab('console');
+		if (activeTab === 'plugins' && !uploadCapableLoader(inst.loader)) setActiveTab('console');
+	});
 
 	let inst = $state<Instance | null>(null);
 	let loadError = $state('');
@@ -1241,20 +1267,20 @@
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'console'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => (activeTab = 'console')}>콘솔</button
+			onclick={() => setActiveTab('console')}>콘솔</button
 		>
 		<button
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'manage'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => (activeTab = 'manage')}>서버 관리</button
+			onclick={() => setActiveTab('manage')}>서버 관리</button
 		>
 		{#if inst && uploadCapableLoader(inst.loader)}
 			<button
 				class="border-b-2 px-3 py-2 text-sm {activeTab === 'plugins'
 					? 'border-primary font-medium'
 					: 'text-muted-foreground border-transparent'}"
-				onclick={() => (activeTab = 'plugins')}>{pluginTabLabel(inst?.loader)}</button
+				onclick={() => setActiveTab('plugins')}>{pluginTabLabel(inst?.loader)}</button
 			>
 		{/if}
 		{#if inst && inst.kind === 'server'}
@@ -1263,7 +1289,7 @@
 					? 'border-primary font-medium'
 					: 'text-muted-foreground border-transparent'}"
 				onclick={() => {
-					activeTab = 'files';
+					setActiveTab('files');
 					refreshFiles();
 				}}>파일</button
 			>
