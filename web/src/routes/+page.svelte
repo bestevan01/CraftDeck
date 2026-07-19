@@ -353,7 +353,25 @@
 		throw new Error('서버 종료 대기 시간이 초과됐습니다. 인스턴스 상태를 확인한 뒤 다시 시도해주세요.');
 	}
 
+	// Velocity 프록시(kind: 'proxy')는 사용자가 직접 올린 마인크래프트
+	// 서버가 아니라 craftdeckd가 부가적으로 관리하는 내부 라우팅 프로세스라,
+	// 경고 모달의 "실행 중인 서버" 목록에는 넣지 않고 재부팅 직전에
+	// 조용히 내려버린다 -- 사용자 눈엔 서버만 종료 대상으로 보이면 된다.
+	async function stopRunningProxiesSilently() {
+		const runningProxies = instances.filter((i) => i.status === 'running' && i.kind === 'proxy');
+		if (runningProxies.length === 0) return;
+		await Promise.all(runningProxies.map((i) => api.stopInstance(i.id)));
+		await waitForInstancesStopped(runningProxies.map((i) => i.id));
+	}
+
 	async function applyAndRebootNow() {
+		try {
+			await stopRunningProxiesSilently();
+		} catch (err) {
+			overclockError = err instanceof Error ? err.message : String(err);
+			overclockSaving = false;
+			return;
+		}
 		await applyOverclock();
 		if (overclockError) {
 			overclockSaving = false;
@@ -362,10 +380,11 @@
 		await rebootForOverclock();
 	}
 
-	// "적용"과 "재부팅해서 적용"을 하나로 합친 진입점 -- 실행 중인 인스턴스가
-	// 있으면 그대로 재부팅하지 않고 먼저 경고 모달로 동의를 구한다.
+	// "적용"과 "재부팅해서 적용"을 하나로 합친 진입점 -- 실행 중인 서버
+	// 인스턴스가 있으면 그대로 재부팅하지 않고 먼저 경고 모달로 동의를
+	// 구한다(프록시는 별도로, 조용히 처리되므로 여기 목록/판단에서 제외).
 	function requestOverclockReboot() {
-		const running = instances.filter((i) => i.status === 'running');
+		const running = instances.filter((i) => i.status === 'running' && i.kind !== 'proxy');
 		if (running.length === 0) {
 			applyAndRebootNow();
 			return;
