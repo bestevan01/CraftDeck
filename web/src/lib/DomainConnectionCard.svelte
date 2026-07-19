@@ -11,7 +11,8 @@
 		domainTokenRequired,
 		onKindChange,
 		onSave,
-		onUnregister
+		onUnregister,
+		onOpenCloudflareGuide
 	}: {
 		domainConfig: DomainConfig | null;
 		domainForm: {
@@ -26,6 +27,7 @@
 		onKindChange: () => void;
 		onSave: () => void;
 		onUnregister: () => void;
+		onOpenCloudflareGuide: () => void;
 	} = $props();
 
 	// FR-26a: DuckDNS (active renewal) and ipTime (감시 전용, FR-26b/e) are
@@ -38,13 +40,23 @@
 
 <!-- FR-26 minimal skeleton + FR-1f: 도메인 연결 여부가 Velocity 기본
 	프록시 사용 여부를 결정합니다. -->
-<div class="border-border bg-card rounded-lg border p-4">
+<div id="tour-domain-card" class="border-border bg-card rounded-lg border p-4">
 	<h2 class="font-medium">도메인 연결</h2>
 	<p class="text-muted-foreground mt-1 text-xs">
 		소유한 메인 도메인을 연결하면 Velocity 프록시가 자동으로 켜져서 여러 서버를 서브도메인으로 묶어
 		접속할 수 있게 됩니다. 도메인이 없거나 무료 DDNS 서브도메인만 쓰는 경우 서브도메인 라우팅 자체가
 		실제로 닿지 않으므로, Velocity는 꺼지고 각 서버가 포트로 직접 노출됩니다.
 	</p>
+	{#if !domainConfig}
+		<button
+			id="tour-cloudflare-guide"
+			type="button"
+			class="border-border mt-2 rounded-md border px-3 py-1.5 text-xs"
+			onclick={onOpenCloudflareGuide}
+		>
+			Cloudflare 연동 가이드로 설정하기
+		</button>
+	{/if}
 	{#if domainConfig}
 		<p class="mt-2 text-xs">
 			<strong>{domainConfig.kind === 'main_domain' ? '메인 도메인' : '무료 DDNS'}</strong>

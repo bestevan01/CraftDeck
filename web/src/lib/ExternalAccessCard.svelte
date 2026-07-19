@@ -33,7 +33,7 @@
 </script>
 
 <!-- FR-21/22/23/25: 외부 접속 허용 (웹 UI 포트 + 켜진 인스턴스의 게임 포트) -->
-<div class="border-border bg-card rounded-lg border p-4">
+<div id="tour-external-access" class="border-border bg-card rounded-lg border p-4">
 	<div class="flex items-center justify-between">
 		<h2 class="font-medium">외부 접속</h2>
 		<label class="inline-flex cursor-pointer items-center gap-2 text-sm">

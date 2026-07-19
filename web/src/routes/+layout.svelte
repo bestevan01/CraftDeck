@@ -28,8 +28,19 @@
 			// nothing to gate even if authenticated is false.
 			const needsLogin = status.setup_required || (!status.lan_bypass && !status.authenticated);
 			if (needsLogin) {
+				// This layout mounts once and never remounts on client-side
+				// navigation -- `goto` swaps `children` in place, it doesn't
+				// re-run this onMount. The old code returned here without
+				// ever setting `checked`, so after landing on /login the
+				// `{#if checked}` gate below stayed closed forever: the URL
+				// bar showed /login but nothing rendered but the dark-mode
+				// background (confirmed on real hardware -- exactly the
+				// "first load is a black screen, only a manual refresh
+				// fixes it" report, since a hard refresh is the only thing
+				// that re-runs onMount with pathname already /login). Just
+				// fall through to `checked = true` below instead of
+				// returning early.
 				await goto('/login');
-				return;
 			}
 		} catch {
 			// Status check itself failed (backend unreachable) -- let the

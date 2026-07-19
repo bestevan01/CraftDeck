@@ -22,6 +22,8 @@
 	import MemoryConflictModal from '$lib/MemoryConflictModal.svelte';
 	import CreateInstanceModal from '$lib/CreateInstanceModal.svelte';
 	import UpdateAvailableModal from '$lib/UpdateAvailableModal.svelte';
+	import CloudflareTutorialModal from '$lib/CloudflareTutorialModal.svelte';
+	import TourOverlay, { type TourStep } from '$lib/TourOverlay.svelte';
 	import { onDestroy, onMount } from 'svelte';
 
 	// Shared by every destructive action on this page (see ConfirmDialog.svelte
@@ -567,6 +569,59 @@
 		}
 	}
 
+	// 처음 접속한 사용자에게 한 번만 자동으로 보여주는 스포트라이트 투어 --
+	// "다시 보기"는 언제든 헤더의 튜토리얼 버튼으로 가능하니, 서버에 상태를
+	// 두지 않고 이 브라우저에서 이미 봤는지만 localStorage로 기억한다.
+	const TOUR_SEEN_KEY = 'craftdeck-tour-seen';
+	let showTour = $state(false);
+	let showCloudflareGuide = $state(false);
+
+	const tourSteps: TourStep[] = [
+		{
+			selector: '#tour-create-server',
+			title: '서버 만들기',
+			body: '여기서 새 마인크래프트 서버를 몇 번의 클릭으로 만들 수 있어요.',
+			beforeShow: () => (activeTab = 'instances')
+		},
+		{
+			selector: 'a[href^="/instances/"]',
+			title: '실시간 콘솔',
+			body: '서버 로그를 실시간으로 보고 명령어를 바로 입력할 수 있어요. 서버를 하나 만들면 이 버튼으로 들어갈 수 있어요.',
+			beforeShow: () => (activeTab = 'instances')
+		},
+		{
+			selector: '#tour-settings-tab',
+			title: '전역 설정',
+			body: '외부 접속, 도메인 연결, 스왑처럼 서버 하나에 속하지 않는 설정은 여기 모여 있어요.',
+			beforeShow: () => (activeTab = 'instances')
+		},
+		{
+			selector: '#tour-external-access',
+			title: '외부 접속',
+			body: '친구를 초대해서 같이 플레이하려면 여기서 외부 접속을 켜세요.',
+			beforeShow: () => (activeTab = 'settings')
+		},
+		{
+			selector: '#tour-domain-card',
+			title: '도메인 연결',
+			body: '소유한 도메인이 있다면 연결해서 서브도메인으로 여러 서버를 묶을 수 있어요. Cloudflare를 쓴다면 가이드 버튼으로 바로 따라 할 수 있어요.',
+			beforeShow: () => (activeTab = 'settings')
+		},
+		{
+			selector: '#tour-account-button',
+			title: '계정 설정',
+			body: '2단계 인증이나 비밀번호는 여기서 관리해요. 이 투어는 언제든 "튜토리얼" 버튼으로 다시 볼 수 있어요.',
+			placement: 'left'
+		}
+	];
+
+	function startTour() {
+		showTour = true;
+	}
+	function markTourSeen() {
+		localStorage.setItem(TOUR_SEEN_KEY, '1');
+	}
+
 	let pollHandle: ReturnType<typeof setInterval>;
 	let resourcePollHandle: ReturnType<typeof setInterval>;
 	onMount(() => {
@@ -581,6 +636,11 @@
 			username = s.username;
 			isLoggedIn = s.authenticated;
 			totpEnabled = s.totp_enabled;
+			if (s.authenticated && !localStorage.getItem(TOUR_SEEN_KEY)) {
+				// 레이아웃이 자리 잡을 시간을 준 다음 시작 -- 너무 빨리 켜면
+				// 카드 위치가 아직 안 잡혀서 스포트라이트가 엉뚱한 곳을 짚는다.
+				setTimeout(startTour, 600);
+			}
 		});
 		pollHandle = setInterval(refresh, 2000);
 		resourcePollHandle = setInterval(refreshResources, 2000);
@@ -842,6 +902,7 @@
 		<h1 class="text-2xl font-semibold">CraftDeck</h1>
 		<div class="flex gap-2">
 			<button
+				id="tour-create-server"
 				class="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm font-medium"
 				onclick={openCreateForm}
 			>
@@ -849,6 +910,13 @@
 			</button>
 			{#if isLoggedIn}
 				<button
+					class="border-border rounded-md border px-4 py-2 text-sm font-medium"
+					onclick={startTour}
+				>
+					튜토리얼
+				</button>
+				<button
+					id="tour-account-button"
 					class="border-border rounded-md border px-4 py-2 text-sm font-medium"
 					onclick={openAccountModal}
 				>
@@ -876,6 +944,7 @@
 			onclick={() => (activeTab = 'instances')}>인스턴스</button
 		>
 		<button
+			id="tour-settings-tab"
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'settings'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
@@ -981,6 +1050,7 @@
 				onKindChange={onDomainKindChange}
 				onSave={saveDomainSettings}
 				onUnregister={unregisterDomain}
+				onOpenCloudflareGuide={() => (showCloudflareGuide = true)}
 			/>
 			</div>
 			{/if}
@@ -1018,6 +1088,16 @@
 />
 
 <AccountModal bind:open={showAccountModal} bind:username bind:totpEnabled />
+
+<CloudflareTutorialModal
+	bind:open={showCloudflareGuide}
+	bind:domainForm
+	{domainSaving}
+	{domainError}
+	onSave={saveDomainSettings}
+/>
+
+<TourOverlay steps={tourSteps} bind:open={showTour} onFinish={markTourSeen} />
 
 <WANWarningModal
 	bind:open={showWANWarningModal}
