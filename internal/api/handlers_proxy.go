@@ -210,9 +210,11 @@ func (s *Server) removeServerFromProxy(ctx context.Context, serverID string) err
 	}
 	filtered := make([]*instance.ProxyBackend, 0, len(existing))
 	changed := false
+	removedForcedHost := ""
 	for _, b := range existing {
 		if b.BackendInstanceID == serverID {
 			changed = true
+			removedForcedHost = b.ForcedHost
 			continue
 		}
 		filtered = append(filtered, b)
@@ -220,7 +222,55 @@ func (s *Server) removeServerFromProxy(ctx context.Context, serverID string) err
 	if !changed {
 		return nil
 	}
-	return s.applyProxyBackends(ctx, proxy, filtered)
+	if err := s.applyProxyBackends(ctx, proxy, filtered); err != nil {
+		return err
+	}
+	// FR-28's A/SRV records are created the moment a subdomain is assigned
+	// (setServerSubdomain) but nothing ever undid that -- the delete-side
+	// counterpart to SyncMainDomainDNS's upserts. Only clean up if no other
+	// remaining backend still shares this forced host (several servers can,
+	// see writeVelocityConfig's grouping), and only after the backend-list
+	// change above has actually succeeded.
+	if removedForcedHost != "" {
+		stillInUse := false
+		for _, b := range filtered {
+			if b.ForcedHost == removedForcedHost {
+				stillInUse = true
+				break
+			}
+		}
+		if !stillInUse {
+			s.deleteMainDomainDNSRecords(ctx, removedForcedHost)
+		}
+	}
+	return nil
+}
+
+// deleteMainDomainDNSRecords removes fqdn's A/AAAA/SRV records from
+// Cloudflare, the delete-side counterpart to SyncMainDomainDNS's upserts.
+// A no-op if no owned main domain is registered. Best-effort like
+// SyncMainDomainDNS: logs failures rather than propagating them, since the
+// backend-list change that actually stops routing traffic there (the
+// caller's real job) has already succeeded by the time this runs.
+func (s *Server) deleteMainDomainDNSRecords(ctx context.Context, fqdn string) {
+	config, err := s.domains.Get(ctx)
+	if err != nil || config == nil || config.Kind != ddns.KindMainDomain || config.ZoneID == "" {
+		return
+	}
+	token, err := secrets.Decrypt(s.masterKey, config.TokenEncrypted)
+	if err != nil {
+		log.Printf("delete main-domain DNS records for %s: decrypt cloudflare token: %v", fqdn, err)
+		return
+	}
+	if err := dns.DeleteARecord(ctx, token, config.ZoneID, fqdn); err != nil {
+		log.Printf("delete main-domain DNS records: delete A record for %s: %v (continuing with the rest)", fqdn, err)
+	}
+	if err := dns.DeleteAAAARecord(ctx, token, config.ZoneID, fqdn); err != nil {
+		log.Printf("delete main-domain DNS records: delete AAAA record for %s: %v (continuing with the rest)", fqdn, err)
+	}
+	if err := dns.DeleteSRVRecord(ctx, token, config.ZoneID, fqdn); err != nil {
+		log.Printf("delete main-domain DNS records: delete SRV record for %s: %v (continuing with the rest)", fqdn, err)
+	}
 }
 
 // serverSubdomain returns the forced-host subdomain a server is registered
@@ -261,8 +311,10 @@ func (s *Server) setServerSubdomain(ctx context.Context, serverID, forcedHost st
 		return err
 	}
 	found := false
+	previousForcedHost := ""
 	for _, b := range backends {
 		if b.BackendInstanceID == serverID {
+			previousForcedHost = b.ForcedHost
 			b.ForcedHost = forcedHost
 			found = true
 			break
@@ -282,6 +334,23 @@ func (s *Server) setServerSubdomain(ctx context.Context, serverID, forcedHost st
 	// already succeeded above, so this only logs.
 	if err := s.SyncMainDomainDNS(ctx); err != nil {
 		log.Printf("set subdomain: sync main-domain DNS records: %v", err)
+	}
+	// If this server was reassigned away from a *different* previous
+	// subdomain, that old subdomain's records would otherwise be left
+	// dangling in Cloudflare -- same leak as unregistering entirely (see
+	// removeServerFromProxy/deleteMainDomainDNSRecords), just via the
+	// "change subdomain" path instead of the "go independent" path.
+	if previousForcedHost != "" && previousForcedHost != forcedHost {
+		stillInUse := false
+		for _, b := range backends {
+			if b.ForcedHost == previousForcedHost {
+				stillInUse = true
+				break
+			}
+		}
+		if !stillInUse {
+			s.deleteMainDomainDNSRecords(ctx, previousForcedHost)
+		}
 	}
 	return nil
 }

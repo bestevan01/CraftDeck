@@ -173,6 +173,67 @@ func UpsertSRVRecord(ctx context.Context, apiToken, zoneID, fqdn string, port in
 	return upsertRecord(ctx, apiToken, zoneID, existingID, record, recordName)
 }
 
+// DeleteARecord removes fqdn's A record, if one exists -- the counterpart
+// to UpsertARecord, called when a server stops being forced-hosted (see
+// handlers_proxy.go's removeServerFromProxy) so Cloudflare doesn't keep
+// pointing an abandoned subdomain at this server's old IP.
+func DeleteARecord(ctx context.Context, apiToken, zoneID, fqdn string) error {
+	return deleteRecord(ctx, apiToken, zoneID, "A", fqdn)
+}
+
+// DeleteAAAARecord is DeleteARecord's IPv6 counterpart.
+func DeleteAAAARecord(ctx context.Context, apiToken, zoneID, fqdn string) error {
+	return deleteRecord(ctx, apiToken, zoneID, "AAAA", fqdn)
+}
+
+// DeleteSRVRecord removes fqdn's `_minecraft._tcp.<fqdn>` SRV record, if one
+// exists -- the counterpart to UpsertSRVRecord.
+func DeleteSRVRecord(ctx context.Context, apiToken, zoneID, fqdn string) error {
+	return deleteRecord(ctx, apiToken, zoneID, "SRV", "_minecraft._tcp."+fqdn)
+}
+
+// deleteRecord looks up name's record ID and, if found, deletes it. A
+// no-op (not an error) if no such record exists -- callers may call this
+// for a subdomain whose records were never actually created (e.g. the
+// Cloudflare sync never ran before it was unassigned).
+func deleteRecord(ctx context.Context, apiToken, zoneID, recordType, name string) error {
+	existingID, err := findRecordID(ctx, apiToken, zoneID, recordType, name)
+	if err != nil {
+		return err
+	}
+	if existingID == "" {
+		return nil
+	}
+
+	url := fmt.Sprintf("%s/zones/%s/dns_records/%s", apiBase, zoneID, existingID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contact Cloudflare API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var parsed struct {
+		Success bool              `json:"success"`
+		Errors  []cloudflareError `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return fmt.Errorf("parse Cloudflare API response (status %d): %w", resp.StatusCode, err)
+	}
+	if !parsed.Success {
+		if len(parsed.Errors) > 0 {
+			return fmt.Errorf("cloudflare API rejected deleting the %s record for %s: %s", recordType, name, parsed.Errors[0].Message)
+		}
+		return fmt.Errorf("cloudflare API rejected deleting the %s record for %s (status %d)", recordType, name, resp.StatusCode)
+	}
+	return nil
+}
+
 // upsertRecord POSTs record as new if existingID is empty, or PUTs it in
 // place (full replace -- Cloudflare's PUT requires the complete record
 // definition, not a partial patch) if a matching record was already found.

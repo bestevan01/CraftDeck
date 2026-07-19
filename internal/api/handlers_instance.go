@@ -801,6 +801,19 @@ func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
 // unit and RCON connection; shared by handleStopInstance and
 // handleRestartInstance.
 func (s *Server) stopInstanceCore(ctx context.Context, inst *instance.Instance) error {
+	// StatusStopping exists precisely for this multi-second window (a
+	// graceful RCON stop can take up to ~30s for a big world to save) but
+	// was never actually being set anywhere -- the operator's "종료"
+	// button click just sat there showing "실행 중" the whole time and
+	// then jumped straight to "중지됨", with nothing in between to show
+	// the stop was actually in progress (confirmed: exactly what was
+	// happening). Soft-fails like every other status write here: worst
+	// case the UI just shows stale status for this one poll, not worth
+	// aborting the actual stop over.
+	if err := s.instances.UpdateStatus(ctx, inst.ID, instance.StatusStopping); err != nil {
+		log.Printf("mark %s stopping (continuing anyway): %v", inst.ID, err)
+	}
+
 	// Prefer a graceful RCON "stop" (saves the world) over a hard
 	// systemd-run kill. Give the server a window to actually exit before
 	// falling back, since "stop" can take a few seconds to flush chunks.
