@@ -3,6 +3,6 @@ Label: CraftDeck
 Suite: beta
 Codename: trixie
 Architectures: arm64
-Components: main
+Components: main beta canary
 Description: CraftDeck apt repository
 SignWith: BBAB3EAB0E9616B1

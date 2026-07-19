@@ -34,6 +34,7 @@ import (
 	"craftdeck/internal/rcon"
 	"craftdeck/internal/secrets"
 	"craftdeck/internal/tlscert"
+	"craftdeck/internal/update"
 	"craftdeck/web"
 )
 
@@ -72,6 +73,7 @@ func run() error {
 	domains := ddns.NewRepository(database)
 	hardwareSettings := hardware.NewRepository(database)
 	benchmarkRunner := hardware.NewBenchmarkRunner()
+	updateSettings := update.NewRepository(database)
 	masterKey, err := secrets.LoadOrCreateMasterKey(cfg.MasterKeyPath)
 	if err != nil {
 		return fmt.Errorf("load/create master key: %w", err)
@@ -81,7 +83,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("determine web UI port from %q: %w", cfg.ListenAddr, err)
 	}
-	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey, hardwareSettings, benchmarkRunner)
+	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey, hardwareSettings, benchmarkRunner, updateSettings)
 	// FR-28/30: wired up after apiServer exists (ddnsManager is built first
 	// since api.NewServer takes it as a constructor argument) -- see
 	// ddns.Manager.SetMainDomainSync's doc comment.

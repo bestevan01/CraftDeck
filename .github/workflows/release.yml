@@ -12,6 +12,8 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -30,6 +32,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Determine version's canary branch needs full tag/commit history
+          # to find the last stable tag and count commits since it (a
+          # shallow, depth-1 checkout can't do either) -- see that step.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -46,7 +53,52 @@ jobs:
 
       - name: Determine version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        # Three channels (see packaging/apt-repo/conf/distributions'
+        # Components and internal/update's Channel type):
+        #   stable: tag "vX.Y.Z"            -> package version "X.Y.Z"
+        #   beta:   tag "vX.Y.Z-beta.N"     -> package version "X.Y.Z~beta.N"
+        #           (tilde, not hyphen -- verified via `dpkg --compare-versions`
+        #           that a literal hyphen here sorts a beta *above* its final
+        #           release instead of below it, which is backwards)
+        #   canary: every push to main      -> "(last stable tag's patch+1).<commits since that tag>",
+        #           e.g. last stable v0.1.19 -> "0.1.20.<N>" -- deterministic,
+        #           no tag of its own needed, and always sorts above the
+        #           stable version it's built ahead of.
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            case "$tag" in
+              *-beta.*)
+                version="${tag%-beta.*}~beta.${tag##*-beta.}"
+                channel=beta
+                ;;
+              *)
+                version="$tag"
+                channel=stable
+                ;;
+            esac
+          else
+            last_stable=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-beta\.' | sort -V | tail -1)
+            if [ -z "$last_stable" ]; then
+              # No stable tag exists yet (first-ever release built from
+              # main) -- count from the beginning of history instead of a
+              # nonexistent tag ref.
+              major=0; minor=0; next_patch=1
+              count=$(git rev-list --count HEAD)
+            else
+              base="${last_stable#v}"
+              major="${base%%.*}"
+              rest="${base#*.}"
+              minor="${rest%%.*}"
+              patch="${rest#*.}"
+              next_patch=$((patch + 1))
+              count=$(git rev-list --count "${last_stable}..HEAD")
+            fi
+            version="${major}.${minor}.${next_patch}.${count}"
+            channel=canary
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - name: Cross-compile arm64 binary
         # -X bakes the tag version into internal/version.Version, which
@@ -105,9 +157,24 @@ jobs:
           nfpm package --config nfpm.yaml --packager deb --target ../build/
 
       - name: Publish into the apt repository
+        # Cumulative by design (see internal/update's Channel doc comment):
+        # stable ships into every component so beta/canary subscribers
+        # always have at least the latest stable available even during a
+        # long gap between their own channel's builds; beta ships into
+        # beta+canary; canary (built continuously off main) only into
+        # canary. Same .deb file included into multiple components just
+        # references the same pool blob by hash -- reprepro doesn't
+        # duplicate storage for it.
         run: |
-          reprepro -b packaging/apt-repo includedeb trixie \
-            "build/craftdeck_${{ steps.version.outputs.version }}_arm64.deb"
+          case "${{ steps.version.outputs.channel }}" in
+            stable) components="main beta canary" ;;
+            beta) components="beta canary" ;;
+            canary) components="canary" ;;
+          esac
+          for c in $components; do
+            reprepro -b packaging/apt-repo -C "$c" includedeb trixie \
+              "build/craftdeck_${{ steps.version.outputs.version }}_arm64.deb"
+          done
           cp packaging/craftdeck-archive-keyring.gpg packaging/apt-repo/craftdeck-archive-keyring.gpg
 
       - name: Upload apt repo as Pages artifact

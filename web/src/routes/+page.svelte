@@ -12,6 +12,7 @@
 		type SwapInfo,
 		type HardwareInfo,
 		type BenchmarkStatus,
+		type UpdateSettings,
 		OVERCLOCK_PRESETS
 	} from '$lib/api';
 	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
@@ -20,6 +21,7 @@
 	import ExternalAccessCard from '$lib/ExternalAccessCard.svelte';
 	import SwapCard from '$lib/SwapCard.svelte';
 	import OverclockCard from '$lib/OverclockCard.svelte';
+	import UpdateSettingsCard from '$lib/UpdateSettingsCard.svelte';
 	import DomainConnectionCard from '$lib/DomainConnectionCard.svelte';
 	import ResourcePanel from '$lib/ResourcePanel.svelte';
 	import WANWarningModal from '$lib/WANWarningModal.svelte';
@@ -29,6 +31,8 @@
 	import CloudflareTutorialModal from '$lib/CloudflareTutorialModal.svelte';
 	import TourOverlay, { type TourStep } from '$lib/TourOverlay.svelte';
 	import { onDestroy, onMount } from 'svelte';
+	import { page } from '$app/stores';
+	import { replaceState } from '$app/navigation';
 
 	// Shared by every destructive action on this page (see ConfirmDialog.svelte
 	// for why this replaced the browser's native confirm()).
@@ -778,6 +782,44 @@
 		}
 	}
 
+	// 업데이트 채널(stable/beta/canary) + 확인 주기 설정. 채널을 바꾸면
+	// 백엔드가 sources.list를 재작성하고 apt-get update까지 실행하므로,
+	// 적용 직후 checkCraftdeckVersion을 다시 불러 최신 버전 표시를 갱신한다.
+	let updateSettings = $state<UpdateSettings | null>(null);
+	let updateSettingsFetchError = $state('');
+	let updateSettingsForm = $state({ channel: 'stable', check_frequency: 'every_visit' });
+	let updateSettingsSaving = $state(false);
+	let updateSettingsError = $state('');
+
+	async function refreshUpdateSettings() {
+		try {
+			updateSettings = await api.getUpdateSettings();
+			updateSettingsForm = {
+				channel: updateSettings.channel,
+				check_frequency: updateSettings.check_frequency
+			};
+			updateSettingsFetchError = '';
+		} catch (err) {
+			updateSettingsFetchError = err instanceof Error ? err.message : String(err);
+		}
+	}
+
+	async function saveUpdateSettings() {
+		updateSettingsSaving = true;
+		updateSettingsError = '';
+		try {
+			updateSettings = await api.setUpdateSettings({
+				channel: updateSettingsForm.channel as UpdateSettings['channel'],
+				check_frequency: updateSettingsForm.check_frequency as UpdateSettings['check_frequency']
+			});
+			await checkCraftdeckVersion();
+		} catch (err) {
+			updateSettingsError = err instanceof Error ? err.message : String(err);
+		} finally {
+			updateSettingsSaving = false;
+		}
+	}
+
 	// 처음 접속한 사용자에게 한 번만 자동으로 보여주는 스포트라이트 투어 --
 	// "다시 보기"는 언제든 계정 설정 모달 안의 버튼으로 가능하니, 서버에
 	// 상태를 두지 않고 이 브라우저에서 이미 봤는지만 localStorage로 기억한다.
@@ -846,6 +888,7 @@
 		});
 		loadMcVersions();
 		checkCraftdeckVersion();
+		refreshUpdateSettings();
 		api.authStatus().then((s) => {
 			username = s.username;
 			isLoggedIn = s.authenticated;
@@ -1110,7 +1153,23 @@
 	// instance detail page -- "라즈베리파이 리소스" stays in its own sticky
 	// sidebar regardless of which tab is active, since it's a live status
 	// readout an operator would want visible no matter what they're doing.
-	let activeTab = $state<'instances' | 'settings'>('instances');
+	// URL의 ?tab= 쿼리에 현재 탭을 반영해서, 새로고침해도 "인스턴스"로
+	// 튕기지 않고 보고 있던 탭 그대로 돌아오게 한다 (투어 중의 일시적인
+	// 탭 전환은 URL을 건드리지 않고 activeTab만 직접 바꾼다 -- 매 스텝마다
+	// history를 쌓을 필요는 없어서).
+	let activeTab = $state<'instances' | 'settings'>(
+		$page.url.searchParams.get('tab') === 'settings' ? 'settings' : 'instances'
+	);
+	function setActiveTab(tab: 'instances' | 'settings') {
+		activeTab = tab;
+		const url = new URL(window.location.href);
+		if (tab === 'instances') {
+			url.searchParams.delete('tab');
+		} else {
+			url.searchParams.set('tab', tab);
+		}
+		replaceState(url, {});
+	}
 </script>
 
 <main class="bg-background text-foreground flex flex-col p-8 lg:h-screen lg:overflow-hidden">
@@ -1151,14 +1210,14 @@
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'instances'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => (activeTab = 'instances')}>인스턴스</button
+			onclick={() => setActiveTab('instances')}>인스턴스</button
 		>
 		<button
 			id="tour-settings-tab"
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'settings'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => (activeTab = 'settings')}>전역 설정</button
+			onclick={() => setActiveTab('settings')}>전역 설정</button
 		>
 	</div>
 
@@ -1315,6 +1374,15 @@
 				onSave={saveDomainSettings}
 				onUnregister={unregisterDomain}
 				onOpenCloudflareGuide={() => (showCloudflareGuide = true)}
+			/>
+
+			<UpdateSettingsCard
+				settings={updateSettings}
+				fetchError={updateSettingsFetchError}
+				bind:form={updateSettingsForm}
+				saving={updateSettingsSaving}
+				error={updateSettingsError}
+				onSave={saveUpdateSettings}
 			/>
 			</div>
 			{/if}

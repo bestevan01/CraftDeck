@@ -23,7 +23,7 @@
 		updateError = '';
 		updating = true;
 		try {
-			await api.updateCraftdeck();
+			await api.updateCraftdeck(latestVersion);
 		} catch (err) {
 			updateError = err instanceof Error ? err.message : String(err);
 			updating = false;

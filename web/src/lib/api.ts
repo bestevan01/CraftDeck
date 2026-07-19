@@ -123,6 +123,14 @@ export type CraftdeckVersion = {
 	update_available: boolean;
 };
 
+// Mirrors internal/update.Settings -- the apt channel craftdeckd's own
+// package tracks, and how often /api/system/version is allowed to actually
+// hit the apt repo rather than reply from its cached last-checked result.
+export type UpdateSettings = {
+	channel: 'stable' | 'beta' | 'canary';
+	check_frequency: 'every_visit' | 'daily' | 'weekly' | 'monthly';
+};
+
 // Mirrors internal/network.PortMapping (FR-22~24).
 export type PortMapping = {
 	id: string;
@@ -433,7 +441,17 @@ export const api = {
 		}),
 	systemResources: () => req<SystemResources>('/api/system/resources'),
 	systemVersion: () => req<CraftdeckVersion>('/api/system/version'),
-	updateCraftdeck: () => req<void>('/api/system/update', { method: 'POST' }),
+	updateCraftdeck: (targetVersion: string) =>
+		req<void>('/api/system/update', {
+			method: 'POST',
+			body: JSON.stringify({ target_version: targetVersion })
+		}),
+	getUpdateSettings: () => req<UpdateSettings>('/api/system/update-settings'),
+	setUpdateSettings: (settings: UpdateSettings) =>
+		req<UpdateSettings>('/api/system/update-settings', {
+			method: 'PUT',
+			body: JSON.stringify(settings)
+		}),
 	listVanillaVersions: () => req<VanillaVersion[]>('/api/loaders/vanilla/versions'),
 	listPaperVersions: () => req<string[]>('/api/loaders/paper/versions'),
 	listPurpurVersions: () => req<string[]>('/api/loaders/purpur/versions'),

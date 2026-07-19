@@ -18,6 +18,7 @@ import (
 	"craftdeck/internal/plugin"
 	"craftdeck/internal/process"
 	"craftdeck/internal/rcon"
+	"craftdeck/internal/update"
 )
 
 type Server struct {
@@ -55,6 +56,10 @@ type Server struct {
 	// overclock feature (internal/hardware) -- see handlers_hardware.go.
 	hardwareSettings *hardware.Repository
 	benchmarkRunner  *hardware.BenchmarkRunner
+
+	// updateSettings backs the update channel (stable/beta/canary) + check
+	// frequency settings (internal/update) -- see handlers_system.go.
+	updateSettings *update.Repository
 }
 
 func NewServer(
@@ -74,6 +79,7 @@ func NewServer(
 	masterKey []byte,
 	hardwareSettings *hardware.Repository,
 	benchmarkRunner *hardware.BenchmarkRunner,
+	updateSettings *update.Repository,
 ) *Server {
 	return &Server{
 		instances:        instances,
@@ -92,6 +98,7 @@ func NewServer(
 		masterKey:        masterKey,
 		hardwareSettings: hardwareSettings,
 		benchmarkRunner:  benchmarkRunner,
+		updateSettings:   updateSettings,
 	}
 }
 
@@ -114,6 +121,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/system/resources", s.handleSystemResources)
 	mux.HandleFunc("GET /api/system/version", s.handleCraftdeckVersion)
 	mux.HandleFunc("POST /api/system/update", s.handleUpdateCraftdeck)
+	mux.HandleFunc("GET /api/system/update-settings", s.handleGetUpdateSettings)
+	mux.HandleFunc("PUT /api/system/update-settings", s.handleSetUpdateSettings)
 	mux.HandleFunc("GET /api/system/swap", s.handleGetSwap)
 	mux.HandleFunc("PUT /api/system/swap", s.handleSetSwap)
 	mux.HandleFunc("DELETE /api/system/swap", s.handleDeleteSwap)

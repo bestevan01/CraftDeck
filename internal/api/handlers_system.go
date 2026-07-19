@@ -8,22 +8,28 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"craftdeck/internal/swap"
+	"craftdeck/internal/update"
 	"craftdeck/internal/version"
 )
 
-// craftdeckAptPackagesURL is our own apt repository's package index for the
-// architecture this daemon actually runs on (Raspberry Pi 4/5 are both
-// arm64) -- checking it directly (rather than e.g. GitHub's releases API)
-// means "update available" here always matches exactly what
-// `apt update && apt upgrade craftdeck` would do, since it's the same file
-// apt itself resolves against.
-const craftdeckAptPackagesURL = "https://apt.apple-farm.online/dists/trixie/main/binary-arm64/Packages"
+// craftdeckAptPackagesURL is our own apt repository's per-channel package
+// index for the architecture this daemon actually runs on (Raspberry Pi
+// 4/5 are both arm64) -- checking it directly (rather than e.g. GitHub's
+// releases API) means "update available" here always matches exactly what
+// `apt update && apt install craftdeck=<version>` would do, since it's the
+// same file apt itself resolves against. component is the apt repository
+// component the operator's chosen channel maps to (see
+// update.Channel.AptComponent).
+func craftdeckAptPackagesURL(component string) string {
+	return fmt.Sprintf("https://apt.apple-farm.online/dists/trixie/%s/binary-arm64/Packages", component)
+}
 
 type craftdeckVersionResponse struct {
 	CurrentVersion  string `json:"current_version"`
@@ -31,36 +37,104 @@ type craftdeckVersionResponse struct {
 	UpdateAvailable bool   `json:"update_available"`
 }
 
+// checkIntervalFor maps a check_frequency setting to how long
+// handleCraftdeckVersion should trust its cached result before hitting the
+// apt repo again. "every_visit" returns ok=false, meaning never throttle --
+// every call does a real check, matching its literal meaning.
+func checkIntervalFor(freq update.CheckFrequency) (interval time.Duration, throttled bool) {
+	switch freq {
+	case update.CheckDaily:
+		return 24 * time.Hour, true
+	case update.CheckWeekly:
+		return 7 * 24 * time.Hour, true
+	case update.CheckMonthly:
+		return 30 * 24 * time.Hour, true
+	default:
+		return 0, false
+	}
+}
+
 // handleCraftdeckVersion reports craftdeckd's own version against the
-// newest one published to the apt repository, so the UI can surface an
-// "update available" notice the same way it already does for the Velocity
-// proxy (handleGetProxyStatus). Unlike that one, a fetch failure here isn't
-// fatal to the response -- it's a nice-to-have notice, not something
-// callers are blocked on, so update_available just stays false.
+// newest one published to the operator's chosen apt channel, so the UI can
+// surface an "update available" notice the same way it already does for
+// the Velocity proxy (handleGetProxyStatus). Honors update_settings'
+// check_frequency by replying from the cached last-checked result instead
+// of re-fetching when the configured interval hasn't elapsed yet. A fetch
+// failure isn't fatal to the response -- it's a nice-to-have notice, not
+// something callers are blocked on, so it just falls back to whatever was
+// last cached (possibly empty on a fresh install).
 func (s *Server) handleCraftdeckVersion(w http.ResponseWriter, r *http.Request) {
 	resp := craftdeckVersionResponse{CurrentVersion: version.Version}
-	if latest, err := fetchLatestCraftdeckVersion(r.Context()); err == nil {
-		resp.LatestVersion = latest
-		resp.UpdateAvailable = latest != "" && latest != version.Version
+
+	settings, err := s.updateSettings.Get(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	latest := settings.CachedLatestVersion
+	interval, throttled := checkIntervalFor(settings.CheckFrequency)
+	dueForCheck := !throttled || settings.LastCheckedAt == nil || time.Since(*settings.LastCheckedAt) >= interval
+	if dueForCheck {
+		if fresh, err := fetchLatestCraftdeckVersion(r.Context(), settings.Channel.AptComponent()); err == nil {
+			latest = fresh
+			_ = s.updateSettings.RecordCheck(r.Context(), fresh)
+		}
+	}
+
+	resp.LatestVersion = latest
+	resp.UpdateAvailable = latest != "" && latest != version.Version
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleUpdateCraftdeck triggers `apt upgrade craftdeck` in the background
-// and returns immediately -- it can't run the upgrade inline and wait for
-// it to finish, since that upgrade replaces and restarts craftdeckd itself
-// (see postinst's restart-on-upgrade step), which would kill the very
-// process handling this HTTP request partway through and never send a
-// response. systemd-run detaches the apt-get invocation into its own
-// transient unit, independent of craftdeckd's process tree, so it survives
-// the restart it triggers. The frontend is expected to poll
-// /api/system/version afterward (tolerating a few seconds of connection
-// refused while the restart happens) and reload once it succeeds again.
+// validPackageVersion matches the character set dpkg version strings can
+// contain (Debian Policy 5.6.12) -- guards target_version before it's
+// interpolated into an apt package=version argument (see
+// handleUpdateCraftdeck).
+var validPackageVersion = regexp.MustCompile(`^[A-Za-z0-9.+~:-]+$`)
+
+type updateCraftdeckRequest struct {
+	TargetVersion string `json:"target_version"`
+}
+
+// handleUpdateCraftdeck installs an exact target version (rather than
+// `apt upgrade`) and returns immediately -- it can't run the install
+// inline and wait for it to finish, since that install replaces and
+// restarts craftdeckd itself (see postinst's restart-on-upgrade step),
+// which would kill the very process handling this HTTP request partway
+// through and never send a response. A specific version (the caller's most
+// recent /api/system/version response) rather than a plain upgrade is
+// required because switching to a "lower" channel (e.g. canary -> stable)
+// is a downgrade in dpkg version terms, which `apt upgrade` refuses to do
+// at all. `apt-get update` runs synchronously first (a couple of seconds,
+// doesn't touch craftdeckd's own process) so a stale/misconfigured source
+// list surfaces as a normal error response instead of silently failing
+// inside the detached unit; only the actual install (which kills this
+// process) is detached via systemd-run, independent of craftdeckd's
+// process tree so it survives the restart it triggers. The frontend is
+// expected to poll /api/system/version afterward (tolerating a few seconds
+// of connection refused while the restart happens) and reload once it
+// succeeds again.
 func (s *Server) handleUpdateCraftdeck(w http.ResponseWriter, r *http.Request) {
+	var req updateCraftdeckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TargetVersion == "" {
+		http.Error(w, "target_version is required", http.StatusBadRequest)
+		return
+	}
+	if !validPackageVersion.MatchString(req.TargetVersion) {
+		http.Error(w, "invalid target_version", http.StatusBadRequest)
+		return
+	}
+
+	if err := exec.CommandContext(r.Context(), "apt-get", "update").Run(); err != nil {
+		http.Error(w, fmt.Sprintf("apt-get update failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	cmd := exec.Command("systemd-run",
 		"--unit=craftdeck-selfupdate",
 		"--collect",
-		"/bin/sh", "-c", "apt-get update && apt-get install --only-upgrade -y craftdeck")
+		"apt-get", "install", "--allow-downgrades", "-y", "craftdeck="+req.TargetVersion)
 	if err := cmd.Run(); err != nil {
 		http.Error(w, fmt.Sprintf("failed to start update: %v", err), http.StatusInternalServerError)
 		return
@@ -68,10 +142,69 @@ func (s *Server) handleUpdateCraftdeck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// handleGetUpdateSettings reports the operator's chosen update channel and
+// check frequency (see internal/update.Settings).
+func (s *Server) handleGetUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.updateSettings.Get(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+type setUpdateSettingsRequest struct {
+	Channel        string `json:"channel"`
+	CheckFrequency string `json:"check_frequency"`
+}
+
+// handleSetUpdateSettings persists a new channel/check-frequency choice
+// and, if the channel changed, immediately rewrites
+// /etc/apt/sources.list.d/craftdeck.list and refreshes apt's index (see
+// update.ApplySourcesList) so the very next version check already reflects
+// it.
+func (s *Server) handleSetUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var req setUpdateSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	channel := update.Channel(req.Channel)
+	switch channel {
+	case update.ChannelStable, update.ChannelBeta, update.ChannelCanary:
+	default:
+		http.Error(w, fmt.Sprintf("unknown channel %q", req.Channel), http.StatusBadRequest)
+		return
+	}
+	freq := update.CheckFrequency(req.CheckFrequency)
+	switch freq {
+	case update.CheckEveryVisit, update.CheckDaily, update.CheckWeekly, update.CheckMonthly:
+	default:
+		http.Error(w, fmt.Sprintf("unknown check_frequency %q", req.CheckFrequency), http.StatusBadRequest)
+		return
+	}
+
+	if err := update.ApplySourcesList(channel); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.updateSettings.SetChannelAndFrequency(r.Context(), channel, freq); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	settings, err := s.updateSettings.Get(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
 // fetchLatestCraftdeckVersion parses the "Version:" field out of the
-// craftdeck stanza in our apt repository's Packages index.
-func fetchLatestCraftdeckVersion(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, craftdeckAptPackagesURL, nil)
+// craftdeck stanza in the given apt channel's Packages index.
+func fetchLatestCraftdeckVersion(ctx context.Context, component string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, craftdeckAptPackagesURL(component), nil)
 	if err != nil {
 		return "", err
 	}
