@@ -16,7 +16,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -126,18 +126,28 @@ jobs:
         # only publishes into e.g. "canary" must not silently wipe out
         # "main"/"beta"'s existing content when its deploy replaces the
         # whole site. Restoring the last run's state first makes each
-        # `includedeb` genuinely incremental again. restore-keys falls back
-        # to the most recent previous save, since this run's own (exact)
-        # key can never already exist.
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            packaging/apt-repo/db
-            packaging/apt-repo/pool
-            packaging/apt-repo/dists
-          key: apt-repo-state-${{ github.run_id }}
-          restore-keys: |
-            apt-repo-state-
+        # `includedeb` genuinely incremental again.
+        #
+        # Uses a dedicated orphan branch (not actions/cache) because
+        # actions/cache scopes caches by branch, and this repo's two
+        # trigger types (a tag push and a main branch push) don't reliably
+        # see each other's caches -- confirmed in practice: a cache saved
+        # by a tag-triggered run was invisible to the very next
+        # branch-triggered run's restore-keys fallback, silently wiping
+        # main/beta again despite the cache steps reporting success. A git
+        # branch has no such scoping.
+        run: |
+          rm -rf /tmp/apt-repo-state
+          if git clone --quiet --depth 1 --branch apt-repo-state \
+              "https://github.com/${{ github.repository }}.git" /tmp/apt-repo-state 2>/dev/null; then
+            mkdir -p packaging/apt-repo
+            cp -r /tmp/apt-repo-state/db packaging/apt-repo/ 2>/dev/null || true
+            cp -r /tmp/apt-repo-state/pool packaging/apt-repo/ 2>/dev/null || true
+            cp -r /tmp/apt-repo-state/dists packaging/apt-repo/ 2>/dev/null || true
+            echo "restored previous apt repository state"
+          else
+            echo "no previous apt-repo-state branch yet -- starting fresh"
+          fi
 
       - name: Fetch Adoptium's signing key
         # Not committed to the repo (.gitignore'd) since it's fetched fresh
@@ -201,17 +211,27 @@ jobs:
           cp packaging/craftdeck-archive-keyring.gpg packaging/apt-repo/craftdeck-archive-keyring.gpg
 
       - name: Save apt repository state
-        # Always saves (even if a later step fails) under this run's own
-        # unique key, so the next run's restore-keys fallback picks up
-        # whatever got this far -- see "Restore apt repository state".
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            packaging/apt-repo/db
-            packaging/apt-repo/pool
-            packaging/apt-repo/dists
-          key: apt-repo-state-${{ github.run_id }}
+        # Force-pushes a single squashed commit (not accumulated history)
+        # to the apt-repo-state branch, since pool/ holds every .deb ever
+        # published -- keeping full history here would make this branch
+        # grow without bound across releases. This branch is pure current-
+        # state storage, not a history anyone needs to read.
+        run: |
+          rm -rf /tmp/apt-repo-state-save
+          mkdir -p /tmp/apt-repo-state-save
+          cp -r packaging/apt-repo/db /tmp/apt-repo-state-save/ 2>/dev/null || true
+          cp -r packaging/apt-repo/pool /tmp/apt-repo-state-save/ 2>/dev/null || true
+          cp -r packaging/apt-repo/dists /tmp/apt-repo-state-save/ 2>/dev/null || true
+          cd /tmp/apt-repo-state-save
+          git init --quiet
+          git checkout --quiet -b apt-repo-state
+          git add -A
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit --quiet -m "apt repo state as of ${{ github.sha }}"
+          git push --quiet --force \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            HEAD:apt-repo-state
 
       - name: Upload apt repo as Pages artifact
         uses: actions/upload-pages-artifact@v3
