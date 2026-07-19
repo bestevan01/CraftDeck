@@ -90,13 +90,19 @@ const (
 )
 
 // fanOffsetSafe/Medium/High shift the whole curve down (millidegrees C) so
-// heavier overclocks start cooling earlier -- a real "high" preset
-// benchmark run peaked at 75.1°C, right at the stock curve's top step, with
-// no margin before thermal throttling. Confirmed via Raspberry Pi's
-// documented fan_tempN/fan_tempN_hyst dtparam overrides.
+// heavier overclocks start cooling earlier. Sized from real sustained
+// (3-minute, all-core) benchmark runs comparing stock-curve peaks against
+// throttle risk (~85°C): "high" peaked at 75.1°C on the stock curve, right
+// at its own top step with no margin, so it gets the full 7.5°C pull-down
+// (confirmed afterward to bring the sustained peak down to 66.4°C, ~19°C of
+// throttle margin -- no more is needed there). "safe" and "medium" peaked
+// at 64.8°C/70.8°C on the stock curve, already 20°C/14°C below throttle
+// risk with no help at all, so they only get a light nudge rather than the
+// same aggressive pull-down -- more would just mean earlier, louder fan
+// noise for a margin that was never actually needed.
 const (
-	fanOffsetSafe   = 2500
-	fanOffsetMedium = 5000
+	fanOffsetSafe   = 1000
+	fanOffsetMedium = 2500
 	fanOffsetHigh   = 7500
 )
 
