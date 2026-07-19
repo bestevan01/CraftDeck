@@ -16,7 +16,7 @@ KEYRING=/usr/share/keyrings/craftdeck.gpg
 SOURCES_LIST=/etc/apt/sources.list.d/craftdeck.list
 
 curl -fsSL "$REPO_URL/craftdeck-archive-keyring.gpg" -o "$KEYRING"
-echo "deb [signed-by=$KEYRING] $REPO_URL trixie main" > "$SOURCES_LIST"
+echo "deb [arch=arm64 signed-by=$KEYRING] $REPO_URL trixie main" > "$SOURCES_LIST"
 
 # The Adoptium repo has to be registered *before* `apt-get install craftdeck`
 # runs, not from that package's own postinst -- postinst executes nested

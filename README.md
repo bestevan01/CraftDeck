@@ -67,7 +67,7 @@ http://<라즈베리파이의-IP>:8080
 
 ```bash
 curl -fsSL https://apt.apple-farm.online/craftdeck-archive-keyring.gpg | sudo tee /usr/share/keyrings/craftdeck-archive-keyring.gpg > /dev/null
-echo "deb [signed-by=/usr/share/keyrings/craftdeck-archive-keyring.gpg] https://apt.apple-farm.online trixie main" | sudo tee /etc/apt/sources.list.d/craftdeck.list
+echo "deb [arch=arm64 signed-by=/usr/share/keyrings/craftdeck-archive-keyring.gpg] https://apt.apple-farm.online trixie main" | sudo tee /etc/apt/sources.list.d/craftdeck.list
 sudo apt update
 sudo apt install craftdeck
 ```
