@@ -78,6 +78,54 @@ const (
 	maxOverVoltageDeltaUV = 100000
 )
 
+// fanBaseTempC0..3 are the Pi 5's stock zero-fan curve thresholds
+// (millidegrees C), documented at raspberrypi.com/documentation/computers/
+// config_txt.html#fan-configuration: below 50°C off, 50°C→30%, 60°C→50%,
+// 67.5°C→70%, 75°C→100%, each with a 5°C hysteresis on the way back down.
+const (
+	fanBaseTempC0 = 50000
+	fanBaseTempC1 = 60000
+	fanBaseTempC2 = 67500
+	fanBaseTempC3 = 75000
+)
+
+// fanOffsetSafe/Medium/High shift the whole curve down (millidegrees C) so
+// heavier overclocks start cooling earlier -- a real "high" preset
+// benchmark run peaked at 75.1°C, right at the stock curve's top step, with
+// no margin before thermal throttling. Confirmed via Raspberry Pi's
+// documented fan_tempN/fan_tempN_hyst dtparam overrides.
+const (
+	fanOffsetSafe   = 2500
+	fanOffsetMedium = 5000
+	fanOffsetHigh   = 7500
+)
+
+// fanCurveOffsetUC picks how far to shift the stock fan curve down for a
+// given overclock. Named presets get their fixed offset; a custom
+// (non-preset) value is bucketed by how close its arm_freq is to the
+// nearest named preset's, so an operator typing their own numbers still
+// gets a curve roughly matched to how hard they're pushing the SoC.
+func fanCurveOffsetUC(preset string, armFreqMHz int) int {
+	switch preset {
+	case "safe":
+		return fanOffsetSafe
+	case "medium":
+		return fanOffsetMedium
+	case "high":
+		return fanOffsetHigh
+	}
+	switch {
+	case armFreqMHz >= 2900:
+		return fanOffsetHigh
+	case armFreqMHz >= 2700:
+		return fanOffsetMedium
+	case armFreqMHz >= 2500:
+		return fanOffsetSafe
+	default:
+		return 0
+	}
+}
+
 func (v Values) Validate() error {
 	if !v.Enabled {
 		return nil
@@ -123,8 +171,16 @@ func ApplyConfig(v Values) error {
 			blockStart,
 			fmt.Sprintf("arm_freq=%d", v.ArmFreqMHz),
 			fmt.Sprintf("over_voltage_delta=%d", v.OverVoltageDeltaUV),
-			blockEnd,
 		}
+		if offset := fanCurveOffsetUC(v.Preset, v.ArmFreqMHz); offset > 0 {
+			block = append(block,
+				fmt.Sprintf("dtparam=fan_temp0=%d", fanBaseTempC0-offset),
+				fmt.Sprintf("dtparam=fan_temp1=%d", fanBaseTempC1-offset),
+				fmt.Sprintf("dtparam=fan_temp2=%d", fanBaseTempC2-offset),
+				fmt.Sprintf("dtparam=fan_temp3=%d", fanBaseTempC3-offset),
+			)
+		}
+		block = append(block, blockEnd)
 	}
 
 	var result []string
