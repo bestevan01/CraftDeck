@@ -25,7 +25,7 @@
 		hardwareFetchError: string;
 		redetecting: boolean;
 		onRedetect: () => void;
-		overclockForm: { preset: string; armFreq: string; overVoltage: string };
+		overclockForm: { preset: string; armFreq: string; overVoltageDeltaUV: string };
 		overclockSaving: boolean;
 		overclockError: string;
 		onApplyOverclock: () => void;
@@ -99,14 +99,16 @@
 					/>
 				</div>
 				<div>
-					<label class="text-muted-foreground mb-1 block text-xs" for="oc-over-voltage">over_voltage</label>
+					<label class="text-muted-foreground mb-1 block text-xs" for="oc-over-voltage"
+						>over_voltage_delta (µV)</label
+					>
 					<input
 						id="oc-over-voltage"
 						type="number"
 						min="0"
-						max="10"
-						step="1"
-						bind:value={overclockForm.overVoltage}
+						max="100000"
+						step="5000"
+						bind:value={overclockForm.overVoltageDeltaUV}
 						class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
 					/>
 				</div>
@@ -126,7 +128,7 @@
 
 		{#if hardwareInfo.overclock_enabled}
 			<p class="text-muted-foreground mt-2 text-xs">
-				현재 적용됨: arm_freq={hardwareInfo.overclock_arm_freq}MHz, over_voltage={hardwareInfo.overclock_over_voltage}
+				현재 적용됨: arm_freq={hardwareInfo.overclock_arm_freq}MHz, over_voltage_delta={hardwareInfo.overclock_over_voltage_delta}µV
 				(재부팅 후 반영)
 			</p>
 		{/if}

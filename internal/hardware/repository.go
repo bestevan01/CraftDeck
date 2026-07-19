@@ -18,11 +18,11 @@ type Config struct {
 	CoolerDetected  bool       `json:"cooler_detected"`
 	CoolerCheckedAt *time.Time `json:"cooler_checked_at,omitempty"`
 
-	OverclockEnabled     bool       `json:"overclock_enabled"`
-	OverclockPreset      string     `json:"overclock_preset"`
-	OverclockArmFreq     int        `json:"overclock_arm_freq,omitempty"`
-	OverclockOverVoltage int        `json:"overclock_over_voltage,omitempty"`
-	OverclockAppliedAt   *time.Time `json:"overclock_applied_at,omitempty"`
+	OverclockEnabled          bool       `json:"overclock_enabled"`
+	OverclockPreset           string     `json:"overclock_preset"`
+	OverclockArmFreq          int        `json:"overclock_arm_freq,omitempty"`
+	OverclockOverVoltageDelta int        `json:"overclock_over_voltage_delta,omitempty"`
+	OverclockAppliedAt        *time.Time `json:"overclock_applied_at,omitempty"`
 
 	LastBenchmarkResult string     `json:"last_benchmark_result"`
 	LastBenchmarkAt     *time.Time `json:"last_benchmark_at,omitempty"`
@@ -39,14 +39,14 @@ func NewRepository(db *sql.DB) *Repository {
 func (r *Repository) Get(ctx context.Context) (*Config, error) {
 	var c Config
 	var coolerCheckedAt, overclockAppliedAt, lastBenchmarkAt sql.NullString
-	var armFreq, overVoltage sql.NullInt64
+	var armFreq, overVoltageDelta sql.NullInt64
 	err := r.db.QueryRowContext(ctx, `
 		SELECT cooler_detected, cooler_checked_at, overclock_enabled, overclock_preset,
-			overclock_arm_freq, overclock_over_voltage, overclock_applied_at,
+			overclock_arm_freq, overclock_over_voltage_delta, overclock_applied_at,
 			last_benchmark_result, last_benchmark_at
 		FROM hardware_settings WHERE id = 1`,
 	).Scan(&c.CoolerDetected, &coolerCheckedAt, &c.OverclockEnabled, &c.OverclockPreset,
-		&armFreq, &overVoltage, &overclockAppliedAt,
+		&armFreq, &overVoltageDelta, &overclockAppliedAt,
 		&c.LastBenchmarkResult, &lastBenchmarkAt)
 	if err != nil {
 		return nil, err
@@ -57,8 +57,8 @@ func (r *Repository) Get(ctx context.Context) (*Config, error) {
 	if armFreq.Valid {
 		c.OverclockArmFreq = int(armFreq.Int64)
 	}
-	if overVoltage.Valid {
-		c.OverclockOverVoltage = int(overVoltage.Int64)
+	if overVoltageDelta.Valid {
+		c.OverclockOverVoltageDelta = int(overVoltageDelta.Int64)
 	}
 	return &c, nil
 }
@@ -86,13 +86,13 @@ func (r *Repository) ClearCoolerDetection(ctx context.Context) error {
 // SetOverclock persists the operator's chosen overclock values after
 // Overclock.Apply has successfully written them to config.txt. A reboot
 // (triggered separately) is what actually makes them take effect.
-func (r *Repository) SetOverclock(ctx context.Context, enabled bool, preset string, armFreq, overVoltage int) error {
+func (r *Repository) SetOverclock(ctx context.Context, enabled bool, preset string, armFreq, overVoltageDeltaUV int) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE hardware_settings
 		SET overclock_enabled = ?, overclock_preset = ?, overclock_arm_freq = ?,
-			overclock_over_voltage = ?, overclock_applied_at = ?
+			overclock_over_voltage_delta = ?, overclock_applied_at = ?
 		WHERE id = 1`,
-		enabled, preset, armFreq, overVoltage, time.Now().UTC().Format(time.RFC3339))
+		enabled, preset, armFreq, overVoltageDeltaUV, time.Now().UTC().Format(time.RFC3339))
 	return err
 }
 

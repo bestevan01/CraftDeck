@@ -183,7 +183,7 @@ export type HardwareInfo = {
 	overclock_enabled: boolean;
 	overclock_preset: string;
 	overclock_arm_freq?: number;
-	overclock_over_voltage?: number;
+	overclock_over_voltage_delta?: number;
 	overclock_applied_at?: string;
 	last_benchmark_result: '' | 'pass' | 'fail';
 	last_benchmark_at?: string;
@@ -203,12 +203,14 @@ export type BenchmarkStatus = {
 
 // Mirrors hardware.Presets -- kept in sync by hand since it's a short,
 // rarely-changed list; not worth a round trip just to render four radio
-// options.
+// options. over_voltage_delta_uv is in microvolts (Pi 5 firmware's actual
+// config.txt key, over_voltage_delta) -- "high" matches values already
+// confirmed stable on real hardware, not a guess.
 export const OVERCLOCK_PRESETS = [
-	{ name: 'default', label: '기본값', arm_freq_mhz: 2400, over_voltage: 0 },
-	{ name: 'safe', label: '안전', arm_freq_mhz: 2600, over_voltage: 3 },
-	{ name: 'medium', label: '보통', arm_freq_mhz: 2800, over_voltage: 6 },
-	{ name: 'high', label: '높음', arm_freq_mhz: 3000, over_voltage: 8 }
+	{ name: 'default', label: '기본값', arm_freq_mhz: 2400, over_voltage_delta_uv: 0 },
+	{ name: 'safe', label: '안전', arm_freq_mhz: 2600, over_voltage_delta_uv: 30000 },
+	{ name: 'medium', label: '보통', arm_freq_mhz: 2800, over_voltage_delta_uv: 50000 },
+	{ name: 'high', label: '높음', arm_freq_mhz: 3000, over_voltage_delta_uv: 80000 }
 ] as const;
 
 // Mirrors internal/ddns.Config -- whether an owned domain or only a free
@@ -514,14 +516,14 @@ export const api = {
 	// setOverclock 자체가 서버에서 403으로 거부된다.
 	getHardware: () => req<HardwareInfo>('/api/system/hardware'),
 	redetectCooler: () => req<HardwareInfo>('/api/system/hardware/redetect', { method: 'POST' }),
-	setOverclock: (enabled: boolean, preset: string, armFreqMHz: number, overVoltage: number) =>
+	setOverclock: (enabled: boolean, preset: string, armFreqMHz: number, overVoltageDeltaUV: number) =>
 		req<HardwareInfo>('/api/system/overclock', {
 			method: 'PUT',
 			body: JSON.stringify({
 				enabled,
 				preset,
 				arm_freq_mhz: armFreqMHz,
-				over_voltage: overVoltage
+				over_voltage_delta_uv: overVoltageDeltaUV
 			})
 		}),
 	rebootForOverclock: () => req<void>('/api/system/overclock/reboot', { method: 'POST' }),

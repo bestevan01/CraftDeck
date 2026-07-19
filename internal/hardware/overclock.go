@@ -22,25 +22,36 @@ const (
 	blockEnd   = "# --- end CraftDeck overclock ---"
 )
 
-// Preset is a known-safe (per Raspberry Pi community testing) arm_freq/
-// over_voltage combination an operator can pick without having to know
-// what either number means. "커스텀" in the UI bypasses this list entirely
-// and lets them type their own values (see Values' bounds below).
+// Preset is a known-safe (per Raspberry Pi community testing, and "high"
+// confirmed on the operator's own Pi 5 -- see the ApplyConfig doc comment)
+// arm_freq/over_voltage_delta combination an operator can pick without
+// having to know what either number means. "커스텀" in the UI bypasses this
+// list entirely and lets them type their own values (see Values' bounds
+// below).
+//
+// over_voltage_delta (microvolts) is the current Pi 5 firmware's key, not
+// the legacy over_voltage integer-step key earlier Pi models used --
+// confirmed on real hardware that a manually-added
+// `over_voltage_delta=80000` (i.e. +0.08V) paired with `arm_freq=3000` was
+// already running stably, which is why "high" below matches those exact
+// numbers rather than an untested guess.
 type Preset struct {
-	Name        string
-	Label       string
-	ArmFreqMHz  int
-	OverVoltage int
+	Name               string
+	Label              string
+	ArmFreqMHz         int
+	OverVoltageDeltaUV int
 }
 
-// Presets is deliberately conservative -- "높음" is well short of what
-// enthusiast guides push a well-cooled Pi 5 to, since the benchmark (see
-// RunBenchmark) is the actual safety net, not these numbers.
+// Presets is deliberately conservative below "high" -- enthusiast guides
+// push a well-cooled Pi 5 further, since the benchmark (see RunBenchmark)
+// is the actual safety net, not these numbers. "high" itself is exactly
+// what's already confirmed stable on real hardware (see Preset's doc
+// comment), not a guess.
 var Presets = []Preset{
-	{Name: "default", Label: "기본값", ArmFreqMHz: 2400, OverVoltage: 0},
-	{Name: "safe", Label: "안전", ArmFreqMHz: 2600, OverVoltage: 3},
-	{Name: "medium", Label: "보통", ArmFreqMHz: 2800, OverVoltage: 6},
-	{Name: "high", Label: "높음", ArmFreqMHz: 3000, OverVoltage: 8},
+	{Name: "default", Label: "기본값", ArmFreqMHz: 2400, OverVoltageDeltaUV: 0},
+	{Name: "safe", Label: "안전", ArmFreqMHz: 2600, OverVoltageDeltaUV: 30000},
+	{Name: "medium", Label: "보통", ArmFreqMHz: 2800, OverVoltageDeltaUV: 50000},
+	{Name: "high", Label: "높음", ArmFreqMHz: 3000, OverVoltageDeltaUV: 80000},
 }
 
 // Values bounds a custom overclock request to a range that can't brick a
@@ -50,17 +61,21 @@ var Presets = []Preset{
 // keep this feature's scope to "make it faster", not a general
 // underclocking tool.
 type Values struct {
-	Enabled     bool
-	Preset      string
-	ArmFreqMHz  int
-	OverVoltage int
+	Enabled            bool
+	Preset             string
+	ArmFreqMHz         int
+	OverVoltageDeltaUV int
 }
 
 const (
-	minArmFreqMHz = 2400
-	maxArmFreqMHz = 3200
-	minOverVoltage = 0
-	maxOverVoltage = 10
+	minArmFreqMHz         = 2400
+	maxArmFreqMHz         = 3200
+	minOverVoltageDeltaUV = 0
+	// 100000 microvolts (+0.1V) is a generous ceiling above the "high"
+	// preset's confirmed-stable 80000 -- comfortably covers a custom value
+	// an operator might reasonably want to try, without opening the door
+	// to values community guides consider genuinely risky.
+	maxOverVoltageDeltaUV = 100000
 )
 
 func (v Values) Validate() error {
@@ -70,8 +85,8 @@ func (v Values) Validate() error {
 	if v.ArmFreqMHz < minArmFreqMHz || v.ArmFreqMHz > maxArmFreqMHz {
 		return fmt.Errorf("arm_freq must be between %d and %d MHz", minArmFreqMHz, maxArmFreqMHz)
 	}
-	if v.OverVoltage < minOverVoltage || v.OverVoltage > maxOverVoltage {
-		return fmt.Errorf("over_voltage must be between %d and %d", minOverVoltage, maxOverVoltage)
+	if v.OverVoltageDeltaUV < minOverVoltageDeltaUV || v.OverVoltageDeltaUV > maxOverVoltageDeltaUV {
+		return fmt.Errorf("over_voltage_delta must be between %d and %d microvolts", minOverVoltageDeltaUV, maxOverVoltageDeltaUV)
 	}
 	return nil
 }
@@ -79,8 +94,8 @@ func (v Values) Validate() error {
 // ApplyConfig writes (or removes) craftdeckd's managed block in
 // config.txt. It only takes effect after a reboot -- the firmware reads
 // these keys once at boot, there's no live-apply for arm_freq/
-// over_voltage -- so this never triggers one itself; callers trigger a
-// reboot as an explicit, separate, user-confirmed action.
+// over_voltage_delta -- so this never triggers one itself; callers trigger
+// a reboot as an explicit, separate, user-confirmed action.
 func ApplyConfig(v Values) error {
 	if err := v.Validate(); err != nil {
 		return err
@@ -107,7 +122,7 @@ func ApplyConfig(v Values) error {
 		block = []string{
 			blockStart,
 			fmt.Sprintf("arm_freq=%d", v.ArmFreqMHz),
-			fmt.Sprintf("over_voltage=%d", v.OverVoltage),
+			fmt.Sprintf("over_voltage_delta=%d", v.OverVoltageDeltaUV),
 			blockEnd,
 		}
 	}

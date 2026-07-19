@@ -48,10 +48,10 @@ func (s *Server) handleRedetectCooler(w http.ResponseWriter, r *http.Request) {
 }
 
 type setOverclockRequest struct {
-	Enabled     bool   `json:"enabled"`
-	Preset      string `json:"preset"` // one of hardware.Presets' Name, or "" for custom
-	ArmFreqMHz  int    `json:"arm_freq_mhz"`
-	OverVoltage int    `json:"over_voltage"`
+	Enabled            bool   `json:"enabled"`
+	Preset             string `json:"preset"` // one of hardware.Presets' Name, or "" for custom
+	ArmFreqMHz         int    `json:"arm_freq_mhz"`
+	OverVoltageDeltaUV int    `json:"over_voltage_delta_uv"`
 }
 
 // handleSetOverclock writes the requested overclock into config.txt (see
@@ -79,22 +79,22 @@ func (s *Server) handleSetOverclock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	armFreq, overVoltage := req.ArmFreqMHz, req.OverVoltage
+	armFreq, overVoltageDelta := req.ArmFreqMHz, req.OverVoltageDeltaUV
 	if req.Enabled && req.Preset != "" {
 		preset, ok := findPreset(req.Preset)
 		if !ok {
 			http.Error(w, fmt.Sprintf("unknown preset %q", req.Preset), http.StatusBadRequest)
 			return
 		}
-		armFreq, overVoltage = preset.ArmFreqMHz, preset.OverVoltage
+		armFreq, overVoltageDelta = preset.ArmFreqMHz, preset.OverVoltageDeltaUV
 	}
 
-	values := hardware.Values{Enabled: req.Enabled, Preset: req.Preset, ArmFreqMHz: armFreq, OverVoltage: overVoltage}
+	values := hardware.Values{Enabled: req.Enabled, Preset: req.Preset, ArmFreqMHz: armFreq, OverVoltageDeltaUV: overVoltageDelta}
 	if err := hardware.ApplyConfig(values); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.hardwareSettings.SetOverclock(r.Context(), req.Enabled, req.Preset, armFreq, overVoltage); err != nil {
+	if err := s.hardwareSettings.SetOverclock(r.Context(), req.Enabled, req.Preset, armFreq, overVoltageDelta); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

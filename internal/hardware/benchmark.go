@@ -15,13 +15,13 @@ import (
 // benchmark/status) while a stability self-test is running, and holds its
 // final outcome afterward until the next run starts.
 type BenchmarkStatus struct {
-	Running            bool    `json:"running"`
-	ElapsedSec         int     `json:"elapsed_sec"`
-	TotalSec           int     `json:"total_sec"`
-	TempC              float64 `json:"temp_c"`
-	Result             string  `json:"result"` // "", "pass", "fail"
-	UnderVoltage       bool    `json:"under_voltage_detected"`
-	Throttled          bool    `json:"throttled_detected"`
+	Running      bool    `json:"running"`
+	ElapsedSec   int     `json:"elapsed_sec"`
+	TotalSec     int     `json:"total_sec"`
+	TempC        float64 `json:"temp_c"`
+	Result       string  `json:"result"` // "", "pass", "fail"
+	UnderVoltage bool    `json:"under_voltage_detected"`
+	Throttled    bool    `json:"throttled_detected"`
 }
 
 // BenchmarkRunner drives a single in-process stability test at a time --

@@ -282,7 +282,7 @@
 	let hardwareInfo = $state<HardwareInfo | null>(null);
 	let hardwareFetchError = $state('');
 	let redetectingCooler = $state(false);
-	let overclockForm = $state({ preset: '__none__', armFreq: '2600', overVoltage: '3' });
+	let overclockForm = $state({ preset: '__none__', armFreq: '2600', overVoltageDeltaUV: '30000' });
 	let overclockSaving = $state(false);
 	let overclockError = $state('');
 	let overclockRebooting = $state(false);
@@ -298,8 +298,8 @@
 				overclockForm.preset = hardwareInfo.overclock_preset;
 			}
 			if (hardwareInfo.overclock_arm_freq) overclockForm.armFreq = String(hardwareInfo.overclock_arm_freq);
-			if (hardwareInfo.overclock_over_voltage !== undefined)
-				overclockForm.overVoltage = String(hardwareInfo.overclock_over_voltage);
+			if (hardwareInfo.overclock_over_voltage_delta !== undefined)
+				overclockForm.overVoltageDeltaUV = String(hardwareInfo.overclock_over_voltage_delta);
 		} catch (err) {
 			hardwareFetchError = err instanceof Error ? err.message : String(err);
 		}
@@ -322,14 +322,14 @@
 		try {
 			const enabled = overclockForm.preset !== '__none__';
 			let armFreq = Number(overclockForm.armFreq);
-			let overVoltage = Number(overclockForm.overVoltage);
+			let overVoltageDeltaUV = Number(overclockForm.overVoltageDeltaUV);
 			const preset = OVERCLOCK_PRESETS.find((p) => p.name === overclockForm.preset);
 			if (preset) {
 				armFreq = preset.arm_freq_mhz;
-				overVoltage = preset.over_voltage;
+				overVoltageDeltaUV = preset.over_voltage_delta_uv;
 			}
 			const presetName = overclockForm.preset === 'custom' || overclockForm.preset === '__none__' ? '' : overclockForm.preset;
-			hardwareInfo = await api.setOverclock(enabled, presetName, armFreq, overVoltage);
+			hardwareInfo = await api.setOverclock(enabled, presetName, armFreq, overVoltageDeltaUV);
 		} catch (err) {
 			overclockError = err instanceof Error ? err.message : String(err);
 		} finally {
