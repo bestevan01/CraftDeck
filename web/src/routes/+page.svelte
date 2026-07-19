@@ -570,8 +570,8 @@
 	}
 
 	// 처음 접속한 사용자에게 한 번만 자동으로 보여주는 스포트라이트 투어 --
-	// "다시 보기"는 언제든 헤더의 튜토리얼 버튼으로 가능하니, 서버에 상태를
-	// 두지 않고 이 브라우저에서 이미 봤는지만 localStorage로 기억한다.
+	// "다시 보기"는 언제든 계정 설정 모달 안의 버튼으로 가능하니, 서버에
+	// 상태를 두지 않고 이 브라우저에서 이미 봤는지만 localStorage로 기억한다.
 	const TOUR_SEEN_KEY = 'craftdeck-tour-seen';
 	let showTour = $state(false);
 	let showCloudflareGuide = $state(false);
@@ -584,9 +584,9 @@
 			beforeShow: () => (activeTab = 'instances')
 		},
 		{
-			selector: 'a[href^="/instances/"]',
+			selector: '#tour-console-sample, a[href^="/instances/"]',
 			title: '실시간 콘솔',
-			body: '서버 로그를 실시간으로 보고 명령어를 바로 입력할 수 있어요. 서버를 하나 만들면 이 버튼으로 들어갈 수 있어요.',
+			body: '서버 로그를 실시간으로 보고 명령어를 바로 입력할 수 있어요.',
 			beforeShow: () => (activeTab = 'instances')
 		},
 		{
@@ -610,7 +610,7 @@
 		{
 			selector: '#tour-account-button',
 			title: '계정 설정',
-			body: '2단계 인증이나 비밀번호는 여기서 관리해요. 이 투어는 언제든 "튜토리얼" 버튼으로 다시 볼 수 있어요.',
+			body: '2단계 인증이나 비밀번호는 여기서 관리해요. 이 투어는 여기 안의 "다시 보기" 버튼으로 언제든 다시 볼 수 있어요.',
 			placement: 'left'
 		}
 	];
@@ -910,12 +910,6 @@
 			</button>
 			{#if isLoggedIn}
 				<button
-					class="border-border rounded-md border px-4 py-2 text-sm font-medium"
-					onclick={startTour}
-				>
-					튜토리얼
-				</button>
-				<button
 					id="tour-account-button"
 					class="border-border rounded-md border px-4 py-2 text-sm font-medium"
 					onclick={openAccountModal}
@@ -960,7 +954,45 @@
 				직접 만들거나 관리할 대상이 아니라서(ensureProxyInstance 참고)
 				목록에 아예 보이지 않는다. -->
 			{#if visibleInstances.length === 0 && !loadError}
-				<p class="text-muted-foreground text-sm">서버 인스턴스가 아직 없습니다.</p>
+				{#if showTour}
+					<!-- 처음 접속해서 인스턴스가 하나도 없으면 콘솔 투어 스텝이
+						가리킬 대상 자체가 없어서 조용히 건너뛰어졌다 -- 실제
+						카드와 똑같이 생긴 예시 카드를 대신 보여줘서, 콘솔 버튼이
+						실제로 어떻게 생겼는지는 보여주되 클릭해도 존재하지 않는
+						인스턴스로 이동하지 않도록 버튼들은 비활성화해둔다. -->
+					<div
+						class="border-border bg-card flex items-center justify-between rounded-lg border border-dashed p-4"
+					>
+						<div>
+							<div class="flex items-center gap-2">
+								<span class="h-2 w-2 rounded-full bg-muted-foreground/40"></span>
+								<span class="font-medium">예시 서버</span>
+								<span class="text-muted-foreground text-xs">실행 중</span>
+								<span class="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-[10px]"
+									>예시</span
+								>
+							</div>
+							<p class="text-muted-foreground mt-1 text-xs">Paper · 1.21.4 · Java 21</p>
+						</div>
+						<div class="flex gap-2">
+							<button disabled class="border-border rounded-md border px-3 py-1.5 text-sm opacity-50">
+								종료
+							</button>
+							<span
+								id="tour-console-sample"
+								class="border-border rounded-md border px-3 py-1.5 text-sm">콘솔</span
+							>
+							<button
+								disabled
+								class="border-border text-destructive rounded-md border px-3 py-1.5 text-sm opacity-50"
+							>
+								삭제
+							</button>
+						</div>
+					</div>
+				{:else}
+					<p class="text-muted-foreground text-sm">서버 인스턴스가 아직 없습니다.</p>
+				{/if}
 			{/if}
 			{#each visibleInstances as inst (inst.id)}
 				<div class="border-border bg-card flex items-center justify-between rounded-lg border p-4">
@@ -1087,7 +1119,7 @@
 	onSubmit={createInstance}
 />
 
-<AccountModal bind:open={showAccountModal} bind:username bind:totpEnabled />
+<AccountModal bind:open={showAccountModal} bind:username bind:totpEnabled onStartTour={startTour} />
 
 <CloudflareTutorialModal
 	bind:open={showCloudflareGuide}

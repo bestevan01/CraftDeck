@@ -7,11 +7,13 @@
 	let {
 		open = $bindable(false),
 		username = $bindable(''),
-		totpEnabled = $bindable(false)
+		totpEnabled = $bindable(false),
+		onStartTour
 	}: {
 		open: boolean;
 		username: string;
 		totpEnabled: boolean;
+		onStartTour: () => void;
 	} = $props();
 
 	let currentPassword = $state('');
@@ -155,6 +157,25 @@
 					onclick={() => (showTwoFactorModal = true)}
 				>
 					{totpEnabled ? '관리' : '설정'}
+				</button>
+			</div>
+
+			<hr class="border-border my-4" />
+
+			<div class="flex items-center justify-between">
+				<div>
+					<h3 class="text-sm font-medium">튜토리얼</h3>
+					<p class="text-muted-foreground mt-1 text-xs">처음 접속했을 때 봤던 화면 안내를 다시 봅니다.</p>
+				</div>
+				<button
+					type="button"
+					class="border-border shrink-0 rounded-md border px-3 py-1.5 text-xs"
+					onclick={() => {
+						open = false;
+						onStartTour();
+					}}
+				>
+					다시 보기
 				</button>
 			</div>
 		</div>
