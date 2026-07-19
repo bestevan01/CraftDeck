@@ -116,6 +116,29 @@ jobs:
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           sudo apt-get update && sudo apt-get install -y reprepro
 
+      - name: Restore apt repository state
+        # packaging/apt-repo's db/pool/dists aren't committed to git -- each
+        # run's checkout starts from nothing but conf/. Before 3 channels
+        # existed this didn't matter (every run reproduced the one and only
+        # component from scratch and the Pages deploy fully replacing the
+        # previous one was harmless), but now that stable/beta/canary are
+        # separate components each carrying their own history, a run that
+        # only publishes into e.g. "canary" must not silently wipe out
+        # "main"/"beta"'s existing content when its deploy replaces the
+        # whole site. Restoring the last run's state first makes each
+        # `includedeb` genuinely incremental again. restore-keys falls back
+        # to the most recent previous save, since this run's own (exact)
+        # key can never already exist.
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            packaging/apt-repo/db
+            packaging/apt-repo/pool
+            packaging/apt-repo/dists
+          key: apt-repo-state-${{ github.run_id }}
+          restore-keys: |
+            apt-repo-state-
+
       - name: Fetch Adoptium's signing key
         # Not committed to the repo (.gitignore'd) since it's fetched fresh
         # from Adoptium here rather than trusted long-term from git history --
@@ -176,6 +199,19 @@ jobs:
               "build/craftdeck_${{ steps.version.outputs.version }}_arm64.deb"
           done
           cp packaging/craftdeck-archive-keyring.gpg packaging/apt-repo/craftdeck-archive-keyring.gpg
+
+      - name: Save apt repository state
+        # Always saves (even if a later step fails) under this run's own
+        # unique key, so the next run's restore-keys fallback picks up
+        # whatever got this far -- see "Restore apt repository state".
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            packaging/apt-repo/db
+            packaging/apt-repo/pool
+            packaging/apt-repo/dists
+          key: apt-repo-state-${{ github.run_id }}
 
       - name: Upload apt repo as Pages artifact
         uses: actions/upload-pages-artifact@v3
