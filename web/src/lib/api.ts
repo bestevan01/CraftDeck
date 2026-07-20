@@ -440,7 +440,8 @@ export const api = {
 			body: JSON.stringify(updates)
 		}),
 	systemResources: () => req<SystemResources>('/api/system/resources'),
-	systemVersion: () => req<CraftdeckVersion>('/api/system/version'),
+	systemVersion: (force = false) =>
+		req<CraftdeckVersion>(`/api/system/version${force ? '?force=1' : ''}`),
 	updateCraftdeck: (targetVersion: string) =>
 		req<void>('/api/system/update', {
 			method: 'POST',

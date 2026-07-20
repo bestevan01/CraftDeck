@@ -782,6 +782,31 @@
 		}
 	}
 
+	// 업데이트 설정 카드의 "지금 확인" 버튼 -- 확인 주기가 매일/매주/매달로
+	// 늦춰져 있어도 이 버튼만은 항상 실제로 apt 저장소를 다시 조회한다
+	// (?force=1, handleCraftdeckVersion 참고). 업데이트가 있으면 기존
+	// UpdateAvailableModal이 뜨고, 없으면 이 자리에서 바로 안내한다.
+	let checkingUpdateNow = $state(false);
+	let checkNowMessage = $state('');
+	async function checkForUpdateNow() {
+		checkingUpdateNow = true;
+		checkNowMessage = '';
+		try {
+			const v = await api.systemVersion(true);
+			craftdeckCurrentVersion = v.current_version;
+			craftdeckLatestVersion = v.latest_version ?? '';
+			if (v.update_available) {
+				showUpdateModal = true;
+			} else {
+				checkNowMessage = '최신 버전입니다.';
+			}
+		} catch (err) {
+			checkNowMessage = err instanceof Error ? err.message : String(err);
+		} finally {
+			checkingUpdateNow = false;
+		}
+	}
+
 	// 업데이트 채널(stable/beta/canary) + 확인 주기 설정. 채널을 바꾸면
 	// 백엔드가 sources.list를 재작성하고 apt-get update까지 실행하므로,
 	// 적용 직후 checkCraftdeckVersion을 다시 불러 최신 버전 표시를 갱신한다.
@@ -1393,6 +1418,9 @@
 					saving={updateSettingsSaving}
 					error={updateSettingsError}
 					onSave={saveUpdateSettings}
+					checkingNow={checkingUpdateNow}
+					checkNowMessage={checkNowMessage}
+					onCheckNow={checkForUpdateNow}
 				/>
 			{/if}
 		</div>

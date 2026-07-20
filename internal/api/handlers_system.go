@@ -59,7 +59,9 @@ func checkIntervalFor(freq update.CheckFrequency) (interval time.Duration, throt
 // surface an "update available" notice the same way it already does for
 // the Velocity proxy (handleGetProxyStatus). Honors update_settings'
 // check_frequency by replying from the cached last-checked result instead
-// of re-fetching when the configured interval hasn't elapsed yet. A fetch
+// of re-fetching when the configured interval hasn't elapsed yet -- unless
+// ?force=1 is set (the update-settings card's "지금 확인" button), which
+// always does a real check regardless of the configured cadence. A fetch
 // failure isn't fatal to the response -- it's a nice-to-have notice, not
 // something callers are blocked on, so it just falls back to whatever was
 // last cached (possibly empty on a fresh install).
@@ -74,7 +76,8 @@ func (s *Server) handleCraftdeckVersion(w http.ResponseWriter, r *http.Request) 
 
 	latest := settings.CachedLatestVersion
 	interval, throttled := checkIntervalFor(settings.CheckFrequency)
-	dueForCheck := !throttled || settings.LastCheckedAt == nil || time.Since(*settings.LastCheckedAt) >= interval
+	force := r.URL.Query().Get("force") == "1"
+	dueForCheck := force || !throttled || settings.LastCheckedAt == nil || time.Since(*settings.LastCheckedAt) >= interval
 	if dueForCheck {
 		if fresh, err := fetchLatestCraftdeckVersion(r.Context(), settings.Channel.AptComponent()); err == nil {
 			latest = fresh

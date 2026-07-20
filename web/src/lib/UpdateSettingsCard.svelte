@@ -11,7 +11,10 @@
 		form = $bindable(),
 		saving,
 		error,
-		onSave
+		onSave,
+		checkingNow,
+		checkNowMessage,
+		onCheckNow
 	}: {
 		settings: UpdateSettings | null;
 		fetchError: string;
@@ -19,6 +22,9 @@
 		saving: boolean;
 		error: string;
 		onSave: () => void;
+		checkingNow: boolean;
+		checkNowMessage: string;
+		onCheckNow: () => void;
 	} = $props();
 
 	const checkFrequencyLabels: Record<string, string> = {
@@ -86,5 +92,18 @@
 			현재 채널: {settings.channel} · 확인 주기: {checkFrequencyLabels[settings.check_frequency] ??
 				settings.check_frequency}
 		</p>
+
+		<div class="border-border mt-3 border-t pt-3">
+			<button
+				class="border-border rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
+				disabled={checkingNow}
+				onclick={onCheckNow}
+			>
+				{checkingNow ? '확인 중...' : '지금 확인'}
+			</button>
+			{#if checkNowMessage}
+				<p class="text-muted-foreground mt-2 text-xs">{checkNowMessage}</p>
+			{/if}
+		</div>
 	{/if}
 </div>
