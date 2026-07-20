@@ -528,6 +528,13 @@
 	let fileContentError = $state('');
 	let fileContentSaved = $state(false);
 
+	// 열기를 시도했는데 텍스트로 못 읽는 경우(바이너리, 415) 등 -- 편집기
+	// 모달을 열어버리면 내용이 빈 채로 "저장" 버튼이 활성화돼 있어서,
+	// 실수로 누르면 원본 파일이 빈 내용으로 덮어써질 위험이 있었다. 그래서
+	// 이 경우엔 편집기를 아예 열지 않고 별도 경고 모달로 안내한다.
+	let fileOpenErrorEntry = $state<FileEntry | null>(null);
+	let fileOpenError = $state('');
+
 	let renamingFile = $state<string | null>(null);
 	let renameInput = $state('');
 
@@ -567,19 +574,29 @@
 			navigateToPath(entry.path);
 			return;
 		}
-		editingFile = entry.path;
-		editingContent = '';
-		fileContentError = '';
-		fileContentSaved = false;
+		fileOpenError = '';
+		fileOpenErrorEntry = null;
 		loadingFileContent = true;
 		try {
 			const res = await api.getFileContent(id, entry.path);
+			editingFile = entry.path;
 			editingContent = res.content;
+			fileContentError = '';
+			fileContentSaved = false;
 		} catch (err) {
-			fileContentError = err instanceof Error ? err.message : String(err);
+			// 어떤 이유로든(바이너리, 용량 초과, 기타 오류) 내용을 못 불러왔으면
+			// 편집기 자체를 열지 않는다 -- 빈 textarea에 저장 버튼을 활성화해두면
+			// 실수로 원본을 지울 위험이 있다.
+			fileOpenError = err instanceof Error ? err.message : String(err);
+			fileOpenErrorEntry = entry;
 		} finally {
 			loadingFileContent = false;
 		}
+	}
+
+	function closeFileOpenError() {
+		fileOpenError = '';
+		fileOpenErrorEntry = null;
 	}
 
 	function closeFileEditor() {
@@ -1412,6 +1429,10 @@
 				{fileContentError}
 				{savingFileContent}
 				onSaveFileContent={saveFileContent}
+				{fileOpenError}
+				fileOpenErrorName={fileOpenErrorEntry?.name ?? ''}
+				onCloseFileOpenError={closeFileOpenError}
+				onDownloadFileOpenError={() => fileOpenErrorEntry && downloadEntry(fileOpenErrorEntry)}
 			/>
 		</div>
 	{:else if activeTab === 'console'}

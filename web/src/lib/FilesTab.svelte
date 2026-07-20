@@ -32,7 +32,11 @@
 		fileContentSaved = $bindable(false),
 		fileContentError,
 		savingFileContent,
-		onSaveFileContent
+		onSaveFileContent,
+		fileOpenError,
+		fileOpenErrorName,
+		onCloseFileOpenError,
+		onDownloadFileOpenError
 	}: {
 		uploadingFiles: boolean;
 		onFilePickerChange: (e: Event) => void;
@@ -65,6 +69,10 @@
 		fileContentError: string;
 		savingFileContent: boolean;
 		onSaveFileContent: () => void;
+		fileOpenError: string;
+		fileOpenErrorName: string;
+		onCloseFileOpenError: () => void;
+		onDownloadFileOpenError: () => void;
 	} = $props();
 
 	let pressedBackdrop = false;
@@ -227,6 +235,43 @@
 					{/if}
 				</div>
 			{/if}
+		</div>
+	</div>
+{/if}
+
+<!-- 텍스트로 열 수 없는 파일(바이너리 등)이나 그 외 사유로 내용을 못
+	불러왔을 때 -- 편집기를 열지 않고 별도로 안내한다. 편집기를 빈 내용으로
+	열어버리면 "저장" 버튼이 그대로 활성화돼 있어 실수로 원본을 지울 수
+	있어서다. -->
+{#if fileOpenError}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-8"
+		onmousedown={(e) => (pressedBackdrop = e.target === e.currentTarget)}
+		onclick={(e) => {
+			if (pressedBackdrop && e.target === e.currentTarget) onCloseFileOpenError();
+		}}
+	>
+		<div class="bg-card border-border w-full max-w-sm rounded-lg border p-4 shadow-lg">
+			<h2 class="font-medium">{fileOpenErrorName || '파일'}을(를) 열 수 없습니다</h2>
+			<p class="text-muted-foreground mt-2 text-sm">{fileOpenError}</p>
+			<div class="mt-3 flex gap-2">
+				<button
+					type="button"
+					class="border-border flex-1 rounded-md border px-4 py-2 text-sm font-medium"
+					onclick={onCloseFileOpenError}
+				>
+					닫기
+				</button>
+				<button
+					type="button"
+					class="bg-primary text-primary-foreground flex-1 rounded-md px-4 py-2 text-sm font-medium"
+					onclick={onDownloadFileOpenError}
+				>
+					다운로드
+				</button>
+			</div>
 		</div>
 	</div>
 {/if}
