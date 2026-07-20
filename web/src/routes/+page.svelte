@@ -1375,24 +1375,26 @@
 				onUnregister={unregisterDomain}
 				onOpenCloudflareGuide={() => (showCloudflareGuide = true)}
 			/>
-
-			<UpdateSettingsCard
-				settings={updateSettings}
-				fetchError={updateSettingsFetchError}
-				bind:form={updateSettingsForm}
-				saving={updateSettingsSaving}
-				error={updateSettingsError}
-				onSave={saveUpdateSettings}
-			/>
 			</div>
 			{/if}
 		</div>
 
 		<!-- 라즈베리파이 리소스는 실행 중인 인스턴스/전역 설정 중 무엇을 보고
 			있든 운영자가 항상 확인하고 싶어할 라이브 상태 값이라, 탭 전환과
-			무관하게 별도 사이드바에 고정해서 보여준다. -->
+			무관하게 별도 사이드바에 고정해서 보여준다. 업데이트 설정은 같은
+			사이드바 컬럼에 두되, 전역 설정 탭일 때만 노출한다. -->
 		<div class="lg:col-span-1 lg:min-h-0 lg:overflow-y-auto lg:pr-3">
 			<ResourcePanel {resources} {resourceError} {swapInfo} />
+			{#if activeTab === 'settings'}
+				<UpdateSettingsCard
+					settings={updateSettings}
+					fetchError={updateSettingsFetchError}
+					bind:form={updateSettingsForm}
+					saving={updateSettingsSaving}
+					error={updateSettingsError}
+					onSave={saveUpdateSettings}
+				/>
+			{/if}
 		</div>
 	</div>
 </main>
