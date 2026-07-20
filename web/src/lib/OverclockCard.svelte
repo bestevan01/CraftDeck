@@ -132,7 +132,7 @@
 
 		{#if hardwareInfo.overclock_enabled}
 			<p class="text-muted-foreground mt-2 text-xs">
-				현재 적용됨: arm_freq={hardwareInfo.overclock_arm_freq}MHz, over_voltage_delta={hardwareInfo.overclock_over_voltage_delta}µV
+				현재 적용됨: 클럭 {hardwareInfo.overclock_arm_freq}MHz · 전압 오프셋 +{hardwareInfo.overclock_over_voltage_delta}µV
 			</p>
 		{/if}
 
