@@ -228,139 +228,157 @@
 	{/if}
 </div>
 
-<!-- 접속 주소 복사 버튼 -- 프록시 인스턴스, 독립 노출된 서버, 그리고 이제
-	프록시에 등록된 서버(=이 서버 자신의 포트가 아니라 프록시의 포트로
-	접속해야 함, connectPort 참고)에도 표시. 공인 IP는 외부 접속이 켜져
-	있을 때만 백엔드가 값을 채워 보낸다. -->
-{#if directlyReachable && networkAddresses}
-	{@const port = connectPort}
-	{@const localAddress = formatAddress(networkAddresses.local_ip, port)}
-	{@const publicAddress =
-		networkAddresses.public_ip && !domainConfig ? formatAddress(networkAddresses.public_ip, port) : ''}
-	<div class="border-border bg-card mt-4 rounded-lg border p-4">
-		<h2 class="font-medium">접속 주소</h2>
-		{#if inst.kind === 'server' && subdomain?.registered}
+<!-- server.properties GUI form (FR-12)과 구동기 재설치는 둘 다 "이 서버를
+	무엇으로 구동할지"에 관한 설정이라 한 줄에 나란히 둔다 -- 게임플레이
+	설정은 모달을 여는 버튼 하나뿐이라 가로로 길 필요가 없다. 구동기는
+	proxy 인스턴스에도 적용되므로(게임플레이 설정은 server 전용) 그 경우
+	혼자 전체 폭을 쓴다. -->
+<div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+	<!-- server.properties GUI form (FR-12) -- a curated, labeled subset; anything
+		not listed here is still reachable via the general file manager's raw
+		editing (FR-12a), which is aimed at advanced/custom-loader use rather
+		than everyday tuning. Opens in a modal (GameSettingsModal) since the
+		full form is long -- keeping it inline here would dominate the page. -->
+	{#if inst.kind === 'server'}
+		<div class="border-border bg-card flex items-center justify-between rounded-lg border p-4">
+			<div>
+				<h2 class="font-medium">게임플레이 설정</h2>
+				<p class="text-muted-foreground mt-1 text-xs">
+					난이도, 게임 모드, 최대 인원 등 자주 쓰는 <code>server.properties</code> 옵션
+				</p>
+			</div>
+			<button
+				class="border-border shrink-0 rounded-md border px-3 py-1.5 text-xs"
+				onclick={onOpenGameSettingsModal}>열기</button
+			>
+		</div>
+	{/if}
+
+	<!-- Loader reinstall (FR-4, scoped to same loader + same mc_version -- see
+		handleReinstallLoader's doc comment for why nothing broader is offered
+		here). -->
+	<div
+		class="border-border bg-card rounded-lg border p-4 {inst.kind !== 'server' ? 'md:col-span-2' : ''}"
+	>
+		<h2 class="font-medium">구동기</h2>
+		<p class="text-muted-foreground mt-1 text-xs">{loaderLabel(inst.loader)} · {inst.mc_version}</p>
+		{#if knownLoaders.includes(inst.loader)}
 			<p class="text-muted-foreground mt-1 text-xs">
-				이 서버는 프록시 뒤에 있어 프록시의 포트로 접속합니다. 서브도메인이 지정되어 있으면 그
-				주소로, 아니면 프록시의 우선순위에 따라 다른 서버로 연결될 수 있습니다.
+				같은 구동기·같은 마인크래프트 버전 안에서만 빌드를 다시 받습니다. 다른 구동기나 버전으로
+				바꾸는 기능은 월드/플러그인 호환성이 깨질 수 있어 제공하지 않습니다.
+			</p>
+			{#if buildOptions.length > 0}
+				<div class="mt-2">
+					<label class="mb-1 block text-xs font-medium" for="reinstall-build">빌드</label>
+					<select
+						id="reinstall-build"
+						bind:value={selectedBuildVersion}
+						class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-xs"
+					>
+						<option value="">최신</option>
+						{#each buildOptions as build (build.id)}
+							<option value={build.id}>{build.id}{build.channel ? ` (${build.channel})` : ''}</option>
+						{/each}
+					</select>
+				</div>
+			{:else if buildsError}
+				<p class="text-muted-foreground mt-1 text-xs">빌드 목록을 불러오지 못했습니다: {buildsError}</p>
+			{/if}
+			<button
+				class="border-border mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
+				disabled={reinstalling || !canBackup}
+				title={canBackup ? '' : '먼저 서버를 종료하세요'}
+				onclick={onReinstallLoader}
+			>
+				{reinstalling ? '재설치 중...' : selectedBuildVersion ? `빌드 ${selectedBuildVersion}로 재설치` : '최신 빌드로 재설치'}
+			</button>
+		{:else}
+			<p class="text-muted-foreground mt-1 text-xs">
+				커스텀 구동기입니다. 새 jar로 교체하려면 파일 탭에서 <code>server.jar</code>를 직접 업로드하세요.
 			</p>
 		{/if}
-		<div class="mt-2 space-y-2">
-			{#if domainAddress}
-				<div class="flex items-center justify-between gap-2">
-					<div class="min-w-0">
-						<p class="text-muted-foreground text-xs">{domainAddressLabel}</p>
-						<code class="text-sm">{domainAddress}</code>
-					</div>
-					<CopyButton text={domainAddress} />
-				</div>
-			{/if}
-			<div class="flex items-center justify-between gap-2">
-				<div class="min-w-0">
-					<p class="text-muted-foreground text-xs">사설 IP (같은 네트워크에서)</p>
-					<code class="text-sm">{localAddress}</code>
-				</div>
-				<CopyButton text={localAddress} />
-			</div>
-			{#if publicAddress}
-				<div class="flex items-center justify-between gap-2">
-					<div class="min-w-0">
-						<p class="text-muted-foreground text-xs">공인 IP (외부에서)</p>
-						<code class="text-sm">{publicAddress}</code>
-					</div>
-					<CopyButton text={publicAddress} />
-				</div>
-			{:else if domainConfig}
-				<p class="text-muted-foreground text-xs">도메인이 연결되어 있어 공인 IP 대신 위 주소를 사용하세요.</p>
-			{:else}
-				<p class="text-muted-foreground text-xs">외부 접속이 꺼져 있어 공인 IP 주소는 표시하지 않습니다.</p>
-			{/if}
-		</div>
-	</div>
-{/if}
-
-<!-- server.properties GUI form (FR-12) -- a curated, labeled subset; anything
-	not listed here is still reachable via the general file manager's raw
-	editing (FR-12a), which is aimed at advanced/custom-loader use rather
-	than everyday tuning. Opens in a modal (GameSettingsModal) since the
-	full form is long -- keeping it inline here would dominate the page. -->
-{#if inst.kind === 'server'}
-	<div class="border-border bg-card mt-4 flex items-center justify-between rounded-lg border p-4">
-		<div>
-			<h2 class="font-medium">게임플레이 설정</h2>
-			<p class="text-muted-foreground mt-1 text-xs">
-				난이도, 게임 모드, 최대 인원 등 자주 쓰는 <code>server.properties</code> 옵션
-			</p>
-		</div>
-		<button class="border-border shrink-0 rounded-md border px-3 py-1.5 text-xs" onclick={onOpenGameSettingsModal}
-			>열기</button
-		>
-	</div>
-{/if}
-
-<!-- Loader reinstall (FR-4, scoped to same loader + same mc_version -- see
-	handleReinstallLoader's doc comment for why nothing broader is offered
-	here). -->
-<div class="border-border bg-card mt-4 rounded-lg border p-4">
-	<h2 class="font-medium">구동기</h2>
-	<p class="text-muted-foreground mt-1 text-xs">{loaderLabel(inst.loader)} · {inst.mc_version}</p>
-	{#if knownLoaders.includes(inst.loader)}
-		<p class="text-muted-foreground mt-1 text-xs">
-			같은 구동기·같은 마인크래프트 버전 안에서만 빌드를 다시 받습니다. 다른 구동기나 버전으로
-			바꾸는 기능은 월드/플러그인 호환성이 깨질 수 있어 제공하지 않습니다.
-		</p>
-		{#if buildOptions.length > 0}
-			<div class="mt-2">
-				<label class="mb-1 block text-xs font-medium" for="reinstall-build">빌드</label>
-				<select
-					id="reinstall-build"
-					bind:value={selectedBuildVersion}
-					class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-xs"
-				>
-					<option value="">최신</option>
-					{#each buildOptions as build (build.id)}
-						<option value={build.id}>{build.id}{build.channel ? ` (${build.channel})` : ''}</option>
-					{/each}
-				</select>
-			</div>
-		{:else if buildsError}
-			<p class="text-muted-foreground mt-1 text-xs">빌드 목록을 불러오지 못했습니다: {buildsError}</p>
+		{#if reinstallError}
+			<p class="text-destructive mt-2 text-xs">{reinstallError}</p>
 		{/if}
-		<button
-			class="border-border mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
-			disabled={reinstalling || !canBackup}
-			title={canBackup ? '' : '먼저 서버를 종료하세요'}
-			onclick={onReinstallLoader}
-		>
-			{reinstalling ? '재설치 중...' : selectedBuildVersion ? `빌드 ${selectedBuildVersion}로 재설치` : '최신 빌드로 재설치'}
-		</button>
-	{:else}
-		<p class="text-muted-foreground mt-1 text-xs">
-			커스텀 구동기입니다. 새 jar로 교체하려면 파일 탭에서 <code>server.jar</code>를 직접 업로드하세요.
-		</p>
-	{/if}
-	{#if reinstallError}
-		<p class="text-destructive mt-2 text-xs">{reinstallError}</p>
-	{/if}
-	{#if reinstallSuccess}
-		<p class="mt-2 text-xs text-green-500">재설치됐습니다. 다시 시작하면 적용됩니다.</p>
-	{/if}
+		{#if reinstallSuccess}
+			<p class="mt-2 text-xs text-green-500">재설치됐습니다. 다시 시작하면 적용됩니다.</p>
+		{/if}
+	</div>
 </div>
 
-<!-- Proxy registration -- the operator's one actual proxy-related setting,
-	now that the always-on Velocity proxy itself has no UI of its own (see
-	ensureProxyInstance/proxyMemoryMaxMB). Shown for every server, not just
-	the loaders CraftDeck auto-registers -- a custom loader (FR-3) can still
-	be added manually below.
+<!-- 접속 주소와 프록시는 둘 다 "이 서버에 어떻게 닿는지"에 관한 설정이라
+	한 줄에 나란히 둔다. 접속 주소가 조건부로만 보이므로(directlyReachable),
+	그게 없을 때는 프록시 카드가 혼자 전체 폭을 쓴다. -->
+<div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+	<!-- 접속 주소 복사 버튼 -- 프록시 인스턴스, 독립 노출된 서버, 그리고 이제
+		프록시에 등록된 서버(=이 서버 자신의 포트가 아니라 프록시의 포트로
+		접속해야 함, connectPort 참고)에도 표시. 공인 IP는 외부 접속이 켜져
+		있을 때만 백엔드가 값을 채워 보낸다. -->
+	{#if directlyReachable && networkAddresses}
+		{@const port = connectPort}
+		{@const localAddress = formatAddress(networkAddresses.local_ip, port)}
+		{@const publicAddress =
+			networkAddresses.public_ip && !domainConfig ? formatAddress(networkAddresses.public_ip, port) : ''}
+		<div class="border-border bg-card rounded-lg border p-4">
+			<h2 class="font-medium">접속 주소</h2>
+			{#if inst.kind === 'server' && subdomain?.registered}
+				<p class="text-muted-foreground mt-1 text-xs">
+					이 서버는 프록시 뒤에 있어 프록시의 포트로 접속합니다. 서브도메인이 지정되어 있으면 그
+					주소로, 아니면 프록시의 우선순위에 따라 다른 서버로 연결될 수 있습니다.
+				</p>
+			{/if}
+			<div class="mt-2 space-y-2">
+				{#if domainAddress}
+					<div class="flex items-center justify-between gap-2">
+						<div class="min-w-0">
+							<p class="text-muted-foreground text-xs">{domainAddressLabel}</p>
+							<code class="text-sm">{domainAddress}</code>
+						</div>
+						<CopyButton text={domainAddress} />
+					</div>
+				{/if}
+				<div class="flex items-center justify-between gap-2">
+					<div class="min-w-0">
+						<p class="text-muted-foreground text-xs">사설 IP (같은 네트워크에서)</p>
+						<code class="text-sm">{localAddress}</code>
+					</div>
+					<CopyButton text={localAddress} />
+				</div>
+				{#if publicAddress}
+					<div class="flex items-center justify-between gap-2">
+						<div class="min-w-0">
+							<p class="text-muted-foreground text-xs">공인 IP (외부에서)</p>
+							<code class="text-sm">{publicAddress}</code>
+						</div>
+						<CopyButton text={publicAddress} />
+					</div>
+				{:else if domainConfig}
+					<p class="text-muted-foreground text-xs">도메인이 연결되어 있어 공인 IP 대신 위 주소를 사용하세요.</p>
+				{:else}
+					<p class="text-muted-foreground text-xs">외부 접속이 꺼져 있어 공인 IP 주소는 표시하지 않습니다.</p>
+				{/if}
+			</div>
+		</div>
+	{/if}
 
-	Per FR-1f, Velocity only exists at all when an owned main domain is
-	registered -- with only a free-subdomain DDNS (or nothing) registered,
-	there's no proxy to register into, so this card is replaced with a
-	one-line explanation instead of showing controls that would just error
-	out. -->
-{#if domainConfig?.kind === 'main_domain'}
-	<div class="border-border bg-card mt-4 rounded-lg border p-4">
-		<h2 class="font-medium">프록시</h2>
+	<!-- Proxy registration -- the operator's one actual proxy-related setting,
+		now that the always-on Velocity proxy itself has no UI of its own (see
+		ensureProxyInstance/proxyMemoryMaxMB). Shown for every server, not just
+		the loaders CraftDeck auto-registers -- a custom loader (FR-3) can still
+		be added manually below.
+
+		Per FR-1f, Velocity only exists at all when an owned main domain is
+		registered -- with only a free-subdomain DDNS (or nothing) registered,
+		there's no proxy to register into, so this card is replaced with a
+		one-line explanation instead of showing controls that would just error
+		out. -->
+	{#if domainConfig?.kind === 'main_domain'}
+		<div
+			class="border-border bg-card rounded-lg border p-4 {!(directlyReachable && networkAddresses)
+				? 'md:col-span-2'
+				: ''}"
+		>
+			<h2 class="font-medium">프록시</h2>
 		{#if inst.loader === 'fabric' || inst.loader === 'neoforge'}
 			<p class="mt-1 text-xs text-yellow-500">
 				⚠ 일부 모드(엔티티·블록 상태 등 바닐라 패킷 구조 자체를 변형하는 모드, 예: Create)는
@@ -452,17 +470,22 @@
 				<p class="text-destructive mt-2 text-xs">{proxyRegError}</p>
 			{/if}
 		{/if}
-	</div>
-{:else}
-	<div class="border-border bg-card mt-4 rounded-lg border p-4">
-		<h2 class="font-medium">프록시</h2>
-		<p class="text-muted-foreground mt-1 text-xs">
-			소유한 메인 도메인이 연결되어 있어야 프록시(Velocity)가 동작합니다. 무료 DDNS 서브도메인만
-			등록했거나 도메인이 없는 경우, 이 서버는 독립 노출(자신의 게임 포트로 직접 접속)로만
-			운영됩니다.
-		</p>
-	</div>
-{/if}
+		</div>
+	{:else}
+		<div
+			class="border-border bg-card rounded-lg border p-4 {!(directlyReachable && networkAddresses)
+				? 'md:col-span-2'
+				: ''}"
+		>
+			<h2 class="font-medium">프록시</h2>
+			<p class="text-muted-foreground mt-1 text-xs">
+				소유한 메인 도메인이 연결되어 있어야 프록시(Velocity)가 동작합니다. 무료 DDNS 서브도메인만
+				등록했거나 도메인이 없는 경우, 이 서버는 독립 노출(자신의 게임 포트로 직접 접속)로만
+				운영됩니다.
+			</p>
+		</div>
+	{/if}
+</div>
 
 <!-- Backups (FR-13) and world data export/import share one row. Not
 	applicable to a Velocity proxy: it has no world of its own. -->
