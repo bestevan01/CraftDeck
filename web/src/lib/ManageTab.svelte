@@ -149,91 +149,97 @@
 		return forcedHost;
 	}
 
+	// 저장 버튼과 같은 조건(변경 없음/저장 중)일 때는 Enter도 그냥 무시한다
+	// -- 버튼이 disabled인 상황에서 엔터로는 저장되는 불일치를 피하기 위해.
+	function onSubdomainKeydown(e: KeyboardEvent) {
+		if (e.key !== 'Enter') return;
+		if (savingSubdomain || subdomainInput.trim() === labelFromForcedHost(subdomain?.forced_host ?? '')) return;
+		e.preventDefault();
+		onSaveSubdomain();
+	}
 </script>
 
-<div class="border-border bg-card rounded-lg border p-4">
-	<div class="flex items-center justify-between">
-		<h2 class="font-medium">서버 설정</h2>
-		{#if !editingSettings}
-			<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onOpenSettingsEdit}
-				>설정 변경</button
+<!-- 서버 설정과 게임플레이 설정은 둘 다 짧게 끝나는 카드라 한 줄에 나란히
+	둔다 -- proxy 인스턴스는 게임플레이 설정 자체가 없으니(server 전용)
+	그 경우 서버 설정이 혼자 전체 폭을 쓴다. -->
+<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+	<div class="border-border bg-card rounded-lg border p-4 {inst.kind !== 'server' ? 'md:col-span-2' : ''}">
+		<div class="flex items-center justify-between">
+			<h2 class="font-medium">서버 설정</h2>
+			{#if !editingSettings}
+				<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onOpenSettingsEdit}
+					>설정 변경</button
+				>
+			{/if}
+		</div>
+
+		{#if pendingRestart}
+			<div
+				class="border-border bg-background mt-3 flex items-center justify-between rounded-md border px-3 py-2"
 			>
+				<p class="text-xs">변경된 설정은 재시작해야 적용됩니다.</p>
+				<button
+					class="bg-primary text-primary-foreground shrink-0 rounded-md px-3 py-1.5 text-xs font-medium"
+					disabled={restarting}
+					onclick={onRestartForSettings}>{restarting ? '재시작 중...' : '재시작'}</button
+				>
+			</div>
+		{/if}
+
+		{#if editingSettings}
+			<div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+				{#if inst.kind === 'proxy'}
+					<div>
+						<span class="text-muted-foreground mb-1 block text-xs">메모리 할당</span>
+						<p class="mt-1.5 text-sm">1GB (고정)</p>
+					</div>
+				{:else}
+					<div>
+						<label class="text-muted-foreground mb-1 block text-xs" for="settings-memory">
+							메모리 할당 ({settingsMemoryGB}GB / 최대 {maxMemoryGB}GB{#if ramBoundaryGB < maxMemoryGB}<span
+									class="text-yellow-500"> · 스왑 {maxMemoryGB - ramBoundaryGB}GB 포함</span
+								>{/if})
+						</label>
+						<MemorySlider id="settings-memory" bind:value={settingsMemoryGB} maxGB={maxMemoryGB} {ramBoundaryGB} />
+					</div>
+				{/if}
+				<div>
+					<label class="text-muted-foreground mb-1 block text-xs" for="settings-cpu">
+						CPU 할당량 ({settingsCpu > 0 ? `${settingsCpu}%` : '무제한'})
+					</label>
+					<input
+						id="settings-cpu"
+						type="range"
+						min="0"
+						max="100"
+						step="5"
+						bind:value={settingsCpu}
+						class="w-full"
+					/>
+				</div>
+			</div>
+			{#if settingsError}
+				<p class="text-destructive mt-2 text-xs">{settingsError}</p>
+			{/if}
+			<div class="mt-3 flex gap-2">
+				<button
+					class="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-xs font-medium"
+					disabled={settingsSaving}
+					onclick={onSaveSettings}>저장</button
+				>
+				<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onCancelSettingsEdit}
+					>취소</button
+				>
+			</div>
+		{:else}
+			<p class="text-muted-foreground mt-2 text-xs">
+				메모리 할당 {inst.memory_max_mb > 0
+					? `${(inst.memory_max_mb / 1024).toFixed(1)}GB`
+					: '무제한'} · CPU 할당 {inst.cpu_quota_percent > 0 ? `${inst.cpu_quota_percent}%` : '무제한'}
+			</p>
 		{/if}
 	</div>
 
-	{#if pendingRestart}
-		<div
-			class="border-border bg-background mt-3 flex items-center justify-between rounded-md border px-3 py-2"
-		>
-			<p class="text-xs">변경된 설정은 재시작해야 적용됩니다.</p>
-			<button
-				class="bg-primary text-primary-foreground shrink-0 rounded-md px-3 py-1.5 text-xs font-medium"
-				disabled={restarting}
-				onclick={onRestartForSettings}>{restarting ? '재시작 중...' : '재시작'}</button
-			>
-		</div>
-	{/if}
-
-	{#if editingSettings}
-		<div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-			{#if inst.kind === 'proxy'}
-				<div>
-					<span class="text-muted-foreground mb-1 block text-xs">메모리 할당</span>
-					<p class="mt-1.5 text-sm">1GB (고정)</p>
-				</div>
-			{:else}
-				<div>
-					<label class="text-muted-foreground mb-1 block text-xs" for="settings-memory">
-						메모리 할당 ({settingsMemoryGB}GB / 최대 {maxMemoryGB}GB{#if ramBoundaryGB < maxMemoryGB}<span
-								class="text-yellow-500"> · 스왑 {maxMemoryGB - ramBoundaryGB}GB 포함</span
-							>{/if})
-					</label>
-					<MemorySlider id="settings-memory" bind:value={settingsMemoryGB} maxGB={maxMemoryGB} {ramBoundaryGB} />
-				</div>
-			{/if}
-			<div>
-				<label class="text-muted-foreground mb-1 block text-xs" for="settings-cpu">
-					CPU 할당량 ({settingsCpu > 0 ? `${settingsCpu}%` : '무제한'})
-				</label>
-				<input
-					id="settings-cpu"
-					type="range"
-					min="0"
-					max="100"
-					step="5"
-					bind:value={settingsCpu}
-					class="w-full"
-				/>
-			</div>
-		</div>
-		{#if settingsError}
-			<p class="text-destructive mt-2 text-xs">{settingsError}</p>
-		{/if}
-		<div class="mt-3 flex gap-2">
-			<button
-				class="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-xs font-medium"
-				disabled={settingsSaving}
-				onclick={onSaveSettings}>저장</button
-			>
-			<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onCancelSettingsEdit}
-				>취소</button
-			>
-		</div>
-	{:else}
-		<p class="text-muted-foreground mt-2 text-xs">
-			메모리 할당 {inst.memory_max_mb > 0
-				? `${(inst.memory_max_mb / 1024).toFixed(1)}GB`
-				: '무제한'} · CPU 할당 {inst.cpu_quota_percent > 0 ? `${inst.cpu_quota_percent}%` : '무제한'}
-		</p>
-	{/if}
-</div>
-
-<!-- server.properties GUI form (FR-12)과 구동기 재설치는 둘 다 "이 서버를
-	무엇으로 구동할지"에 관한 설정이라 한 줄에 나란히 둔다 -- 게임플레이
-	설정은 모달을 여는 버튼 하나뿐이라 가로로 길 필요가 없다. 구동기는
-	proxy 인스턴스에도 적용되므로(게임플레이 설정은 server 전용) 그 경우
-	혼자 전체 폭을 쓴다. -->
-<div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
 	<!-- server.properties GUI form (FR-12) -- a curated, labeled subset; anything
 		not listed here is still reachable via the general file manager's raw
 		editing (FR-12a), which is aimed at advanced/custom-loader use rather
@@ -254,56 +260,56 @@
 		</div>
 	{/if}
 
-	<!-- Loader reinstall (FR-4, scoped to same loader + same mc_version -- see
-		handleReinstallLoader's doc comment for why nothing broader is offered
-		here). -->
-	<div
-		class="border-border bg-card rounded-lg border p-4 {inst.kind !== 'server' ? 'md:col-span-2' : ''}"
-	>
-		<h2 class="font-medium">구동기</h2>
-		<p class="text-muted-foreground mt-1 text-xs">{loaderLabel(inst.loader)} · {inst.mc_version}</p>
-		{#if knownLoaders.includes(inst.loader)}
-			<p class="text-muted-foreground mt-1 text-xs">
-				같은 구동기·같은 마인크래프트 버전 안에서만 빌드를 다시 받습니다. 다른 구동기나 버전으로
-				바꾸는 기능은 월드/플러그인 호환성이 깨질 수 있어 제공하지 않습니다.
-			</p>
-			{#if buildOptions.length > 0}
-				<div class="mt-2">
-					<label class="mb-1 block text-xs font-medium" for="reinstall-build">빌드</label>
-					<select
-						id="reinstall-build"
-						bind:value={selectedBuildVersion}
-						class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-xs"
-					>
-						<option value="">최신</option>
-						{#each buildOptions as build (build.id)}
-							<option value={build.id}>{build.id}{build.channel ? ` (${build.channel})` : ''}</option>
-						{/each}
-					</select>
-				</div>
-			{:else if buildsError}
-				<p class="text-muted-foreground mt-1 text-xs">빌드 목록을 불러오지 못했습니다: {buildsError}</p>
-			{/if}
-			<button
-				class="border-border mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
-				disabled={reinstalling || !canBackup}
-				title={canBackup ? '' : '먼저 서버를 종료하세요'}
-				onclick={onReinstallLoader}
-			>
-				{reinstalling ? '재설치 중...' : selectedBuildVersion ? `빌드 ${selectedBuildVersion}로 재설치` : '최신 빌드로 재설치'}
-			</button>
-		{:else}
-			<p class="text-muted-foreground mt-1 text-xs">
-				커스텀 구동기입니다. 새 jar로 교체하려면 파일 탭에서 <code>server.jar</code>를 직접 업로드하세요.
-			</p>
+</div>
+
+<!-- Loader reinstall (FR-4, scoped to same loader + same mc_version -- see
+	handleReinstallLoader's doc comment for why nothing broader is offered
+	here). 서버 설정/게임플레이 설정과 달리 내용이 길어질 수 있어(빌드
+	목록, 안내문 여러 줄) 혼자 전체 폭을 쓴다. -->
+<div class="border-border bg-card mt-4 rounded-lg border p-4">
+	<h2 class="font-medium">구동기</h2>
+	<p class="text-muted-foreground mt-1 text-xs">{loaderLabel(inst.loader)} · {inst.mc_version}</p>
+	{#if knownLoaders.includes(inst.loader)}
+		<p class="text-muted-foreground mt-1 text-xs">
+			같은 구동기·같은 마인크래프트 버전 안에서만 빌드를 다시 받습니다. 다른 구동기나 버전으로
+			바꾸는 기능은 월드/플러그인 호환성이 깨질 수 있어 제공하지 않습니다.
+		</p>
+		{#if buildOptions.length > 0}
+			<div class="mt-2">
+				<label class="mb-1 block text-xs font-medium" for="reinstall-build">빌드</label>
+				<select
+					id="reinstall-build"
+					bind:value={selectedBuildVersion}
+					class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-xs"
+				>
+					<option value="">최신</option>
+					{#each buildOptions as build (build.id)}
+						<option value={build.id}>{build.id}{build.channel ? ` (${build.channel})` : ''}</option>
+					{/each}
+				</select>
+			</div>
+		{:else if buildsError}
+			<p class="text-muted-foreground mt-1 text-xs">빌드 목록을 불러오지 못했습니다: {buildsError}</p>
 		{/if}
-		{#if reinstallError}
-			<p class="text-destructive mt-2 text-xs">{reinstallError}</p>
-		{/if}
-		{#if reinstallSuccess}
-			<p class="mt-2 text-xs text-green-500">재설치됐습니다. 다시 시작하면 적용됩니다.</p>
-		{/if}
-	</div>
+		<button
+			class="border-border mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
+			disabled={reinstalling || !canBackup}
+			title={canBackup ? '' : '먼저 서버를 종료하세요'}
+			onclick={onReinstallLoader}
+		>
+			{reinstalling ? '재설치 중...' : selectedBuildVersion ? `빌드 ${selectedBuildVersion}로 재설치` : '최신 빌드로 재설치'}
+		</button>
+	{:else}
+		<p class="text-muted-foreground mt-1 text-xs">
+			커스텀 구동기입니다. 새 jar로 교체하려면 파일 탭에서 <code>server.jar</code>를 직접 업로드하세요.
+		</p>
+	{/if}
+	{#if reinstallError}
+		<p class="text-destructive mt-2 text-xs">{reinstallError}</p>
+	{/if}
+	{#if reinstallSuccess}
+		<p class="mt-2 text-xs text-green-500">재설치됐습니다. 다시 시작하면 적용됩니다.</p>
+	{/if}
 </div>
 
 <!-- 접속 주소와 프록시는 둘 다 "이 서버에 어떻게 닿는지"에 관한 설정이라
@@ -437,6 +443,7 @@
 						<input
 							type="text"
 							bind:value={subdomainInput}
+							onkeydown={onSubdomainKeydown}
 							placeholder="survival"
 							class="min-w-0 flex-1 bg-transparent text-sm outline-none"
 						/>
@@ -446,6 +453,7 @@
 					<input
 						type="text"
 						bind:value={subdomainInput}
+						onkeydown={onSubdomainKeydown}
 						placeholder="예: survival.example.com"
 						class="border-input bg-background min-w-0 flex-1 rounded-md border px-2 py-1.5 text-sm"
 					/>
