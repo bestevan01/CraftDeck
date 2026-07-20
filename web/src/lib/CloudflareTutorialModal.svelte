@@ -230,7 +230,7 @@
 							<div
 								class="relative rounded border-2 border-blue-500 bg-blue-50 p-1 text-[7.5px] text-neutral-900"
 							>
-								{domainForm.hostname || 'apple-farm.online'}
+								{domainForm.hostname || 'craftdeck.cc'}
 							</div>
 							<div
 								class="mt-1.5 inline-block rounded bg-blue-600 px-2 py-1 text-[8px] font-medium text-white"
@@ -260,7 +260,7 @@
 						<input
 							id="cf-tutorial-hostname"
 							type="text"
-							placeholder="예: apple-farm.online"
+							placeholder="예: craftdeck.cc"
 							bind:value={domainForm.hostname}
 							class="border-input bg-background mb-2 w-full rounded-md border px-3 py-1.5 text-sm"
 						/>

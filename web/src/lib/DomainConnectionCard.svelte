@@ -198,7 +198,7 @@
 					<input
 						id="domain-hostname"
 						type="text"
-						placeholder="예: apple-farm.online"
+						placeholder="예: craftdeck.cc"
 						bind:value={domainForm.hostname}
 						class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
 					/>

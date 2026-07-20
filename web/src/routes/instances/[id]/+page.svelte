@@ -935,7 +935,7 @@
 		}
 	}
 
-	// ".apple-farm.online" (leading dot) when a main domain is registered,
+	// ".craftdeck.cc" (leading dot) when a main domain is registered,
 	// "" otherwise (independent/free-subdomain cases -- see loadDomainConfig).
 	let domainSuffix = $derived(domainConfig?.kind === 'main_domain' ? `.${domainConfig.hostname}` : '');
 
