@@ -203,7 +203,10 @@ export type BenchmarkStatus = {
 	running: boolean;
 	elapsed_sec: number;
 	total_sec: number;
-	temp_c: number;
+	current_temp_c: number;
+	min_temp_c: number;
+	max_temp_c: number;
+	avg_temp_c: number;
 	result: '' | 'pass' | 'fail';
 	under_voltage_detected: boolean;
 	throttled_detected: boolean;

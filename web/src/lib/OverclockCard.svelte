@@ -86,7 +86,7 @@
 		{#if overclockForm.preset === 'custom'}
 			<div class="mt-2 grid grid-cols-2 gap-2">
 				<div>
-					<label class="text-muted-foreground mb-1 block text-xs" for="oc-arm-freq">arm_freq (MHz)</label>
+					<label class="text-muted-foreground mb-1 block text-xs" for="oc-arm-freq">클럭 (MHz)</label>
 					<input
 						id="oc-arm-freq"
 						type="number"
@@ -99,7 +99,7 @@
 				</div>
 				<div>
 					<label class="text-muted-foreground mb-1 block text-xs" for="oc-over-voltage"
-						>over_voltage_delta (µV)</label
+						>전압 오프셋 (µV)</label
 					>
 					<input
 						id="oc-over-voltage"
@@ -140,7 +140,7 @@
 			<h3 class="text-sm font-medium">안정성 테스트</h3>
 			{#if benchmarkStatus?.running}
 				<p class="text-muted-foreground mt-1 text-xs">
-					진행 중... {benchmarkStatus.elapsed_sec}/{benchmarkStatus.total_sec}초, 현재 온도 {benchmarkStatus.temp_c.toFixed(
+					진행 중... {benchmarkStatus.elapsed_sec}/{benchmarkStatus.total_sec}초, 현재 온도 {benchmarkStatus.current_temp_c.toFixed(
 						1
 					)}°C
 				</p>
@@ -152,6 +152,13 @@
 				>
 					{benchmarkStarting ? '시작 중...' : '테스트 시작 (약 90초)'}
 				</button>
+				{#if benchmarkStatus?.result === 'pass' || benchmarkStatus?.result === 'fail'}
+					<p class="text-muted-foreground mt-2 text-xs">
+						온도 평균 {benchmarkStatus.avg_temp_c.toFixed(1)}°C · 최저 {benchmarkStatus.min_temp_c.toFixed(
+							1
+						)}°C · 최고 {benchmarkStatus.max_temp_c.toFixed(1)}°C
+					</p>
+				{/if}
 				{#if benchmarkStatus?.result === 'pass'}
 					<p class="mt-2 text-xs text-green-500">
 						통과 — 언더볼트/쓰로틀링 없이 안정적으로 동작했습니다.

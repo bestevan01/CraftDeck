@@ -462,10 +462,43 @@
 		}, 3000);
 	}
 
-	async function startBenchmark() {
+	// 안정성 테스트는 전체 코어에 90초 넘게 최대 부하를 걸기 때문에, 그동안
+	// 실행 중인 서버가 있으면 플레이어 경험이 나빠지고 측정 자체도 왜곡될
+	// 수 있다. 재부팅 흐름(requestOverclockReboot)과 같은 패턴으로 실행
+	// 중인 서버가 있으면 먼저 동의를 구해 종료한 뒤 진행하고, 이때 종료한
+	// 인스턴스만 기억해뒀다가 테스트가 끝나면 자동으로 다시 시작한다.
+	let benchmarkStoppedInstanceIds = $state<string[]>([]);
+
+	function requestStartBenchmark() {
+		const running = instances.filter((i) => i.status === 'running' && i.kind !== 'proxy');
+		if (running.length === 0) {
+			doStartBenchmark([]);
+			return;
+		}
+		const names = running.map((i) => i.name).join(', ');
+		askConfirm(
+			`다음 서버가 실행 중입니다: ${names}\n안정성 테스트 동안 먼저 종료하고, 끝나면 자동으로 다시 시작합니다. 계속할까요?`,
+			async () => {
+				benchmarkStarting = true;
+				overclockError = '';
+				try {
+					await Promise.all(running.map((i) => api.stopInstance(i.id)));
+					await waitForInstancesStopped(running.map((i) => i.id));
+				} catch (err) {
+					overclockError = err instanceof Error ? err.message : String(err);
+					benchmarkStarting = false;
+					return;
+				}
+				await doStartBenchmark(running.map((i) => i.id));
+			}
+		);
+	}
+
+	async function doStartBenchmark(stoppedInstanceIds: string[]) {
 		benchmarkStarting = true;
 		try {
 			await api.startBenchmark();
+			benchmarkStoppedInstanceIds = stoppedInstanceIds;
 			pollBenchmarkStatus();
 		} catch (err) {
 			overclockError = err instanceof Error ? err.message : String(err);
@@ -479,11 +512,26 @@
 		benchmarkPollHandle = setInterval(async () => {
 			try {
 				benchmarkStatus = await api.getBenchmarkStatus();
-				if (!benchmarkStatus.running) clearInterval(benchmarkPollHandle);
+				if (!benchmarkStatus.running) {
+					clearInterval(benchmarkPollHandle);
+					restartBenchmarkStoppedInstances();
+				}
 			} catch {
 				clearInterval(benchmarkPollHandle);
 			}
-		}, 2000);
+		}, 1000);
+	}
+
+	async function restartBenchmarkStoppedInstances() {
+		const ids = benchmarkStoppedInstanceIds;
+		benchmarkStoppedInstanceIds = [];
+		await Promise.all(
+			ids.map((instId) =>
+				api.startInstance(instId).catch((err) => {
+					overclockError = err instanceof Error ? err.message : String(err);
+				})
+			)
+		);
 	}
 
 	// FR-26 minimal skeleton + FR-1f: whether an owned domain is registered
@@ -1435,7 +1483,7 @@
 				rebooting={overclockRebooting}
 				{benchmarkStatus}
 				{benchmarkStarting}
-				onStartBenchmark={startBenchmark}
+				onStartBenchmark={requestStartBenchmark}
 				onRevertOverclock={revertOverclock}
 			/>
 			</div>

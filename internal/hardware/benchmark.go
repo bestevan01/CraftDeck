@@ -12,13 +12,19 @@ import (
 )
 
 // BenchmarkStatus is polled by the frontend (GET /api/system/overclock/
-// benchmark/status) while a stability self-test is running, and holds its
-// final outcome afterward until the next run starts.
+// benchmark/status) every second while a stability self-test is running --
+// CurrentTempC is the live reading for that display, while
+// Min/Max/AvgTempC accumulate from every sample taken during the run so
+// the frontend can show a summary once it ends. Both stay populated
+// (holding the finished run's numbers) until the next run starts.
 type BenchmarkStatus struct {
 	Running      bool    `json:"running"`
 	ElapsedSec   int     `json:"elapsed_sec"`
 	TotalSec     int     `json:"total_sec"`
-	TempC        float64 `json:"temp_c"`
+	CurrentTempC float64 `json:"current_temp_c"`
+	MinTempC     float64 `json:"min_temp_c"`
+	MaxTempC     float64 `json:"max_temp_c"`
+	AvgTempC     float64 `json:"avg_temp_c"`
 	Result       string  `json:"result"` // "", "pass", "fail"
 	UnderVoltage bool    `json:"under_voltage_detected"`
 	Throttled    bool    `json:"throttled_detected"`
@@ -89,6 +95,9 @@ func (r *BenchmarkRunner) run(duration time.Duration, onDone func(BenchmarkStatu
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	var tempSum float64
+	var tempCount int
+
 	failed := false
 	for time.Now().Before(deadline) && !failed {
 		select {
@@ -97,12 +106,21 @@ func (r *BenchmarkRunner) run(duration time.Duration, onDone func(BenchmarkStatu
 			failed = true
 		}
 		current, _ := readThrottledCurrent(ctx)
-		temp, _ := measureTempC(ctx)
+		temp, tempErr := measureTempC(ctx)
 
 		r.mu.Lock()
 		r.status.ElapsedSec = int(time.Since(start).Seconds())
-		if temp > r.status.TempC {
-			r.status.TempC = temp
+		if tempErr == nil {
+			r.status.CurrentTempC = temp
+			if tempCount == 0 || temp < r.status.MinTempC {
+				r.status.MinTempC = temp
+			}
+			if tempCount == 0 || temp > r.status.MaxTempC {
+				r.status.MaxTempC = temp
+			}
+			tempSum += temp
+			tempCount++
+			r.status.AvgTempC = tempSum / float64(tempCount)
 		}
 		if current.underVoltage {
 			r.status.UnderVoltage = true
