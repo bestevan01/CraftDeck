@@ -50,7 +50,7 @@ Go 단일 바이너리 + SvelteKit 정적 프론트엔드로 구성되어 있으
 라즈베리파이 OS(Debian 12/13 계열, arm64) 기준입니다.
 
 ```bash
-curl -fsSL https://apt.apple-farm.online/install.sh | sudo bash
+curl -fsSL https://apt.craftdeck.cc/install.sh | sudo bash
 ```
 
 이 스크립트는 CraftDeck과 Java 런타임(Eclipse Adoptium) apt 저장소를 등록하고, `craftdeck` 패키지를 설치한 뒤 systemd 서비스를 자동으로 시작합니다.
@@ -66,8 +66,8 @@ http://<라즈베리파이의-IP>:8080
 저장소를 직접 등록하고 싶다면:
 
 ```bash
-curl -fsSL https://apt.apple-farm.online/craftdeck-archive-keyring.gpg | sudo tee /usr/share/keyrings/craftdeck-archive-keyring.gpg > /dev/null
-echo "deb [arch=arm64 signed-by=/usr/share/keyrings/craftdeck-archive-keyring.gpg] https://apt.apple-farm.online trixie main" | sudo tee /etc/apt/sources.list.d/craftdeck.list
+curl -fsSL https://apt.craftdeck.cc/craftdeck-archive-keyring.gpg | sudo tee /usr/share/keyrings/craftdeck-archive-keyring.gpg > /dev/null
+echo "deb [arch=arm64 signed-by=/usr/share/keyrings/craftdeck-archive-keyring.gpg] https://apt.craftdeck.cc trixie main" | sudo tee /etc/apt/sources.list.d/craftdeck.list
 sudo apt update
 sudo apt install craftdeck
 ```

@@ -1,5 +1,5 @@
 #!/bin/sh
-# One-liner installer: curl -fsSL https://apt.apple-farm.online/install.sh | sudo bash
+# One-liner installer: curl -fsSL https://apt.craftdeck.cc/install.sh | sudo bash
 #
 # Registers this apt repository (signed with craftdeck-archive-keyring.gpg,
 # published alongside this script by .github/workflows/release.yml) and
@@ -11,7 +11,7 @@ if [ "$(id -u)" -ne 0 ]; then
 	exit 1
 fi
 
-REPO_URL="https://apt.apple-farm.online"
+REPO_URL="https://apt.craftdeck.cc"
 KEYRING=/usr/share/keyrings/craftdeck.gpg
 SOURCES_LIST=/etc/apt/sources.list.d/craftdeck.list
 

@@ -16,7 +16,7 @@ const sourcesListPath = "/etc/apt/sources.list.d/craftdeck.list"
 
 const (
 	craftdeckKeyringPath = "/usr/share/keyrings/craftdeck.gpg"
-	craftdeckRepoURL     = "https://apt.apple-farm.online"
+	craftdeckRepoURL     = "https://apt.craftdeck.cc"
 )
 
 // ApplySourcesList rewrites craftdeck.list to point at the given channel's

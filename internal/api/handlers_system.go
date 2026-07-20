@@ -28,7 +28,7 @@ import (
 // component the operator's chosen channel maps to (see
 // update.Channel.AptComponent).
 func craftdeckAptPackagesURL(component string) string {
-	return fmt.Sprintf("https://apt.apple-farm.online/dists/trixie/%s/binary-arm64/Packages", component)
+	return fmt.Sprintf("https://apt.craftdeck.cc/dists/trixie/%s/binary-arm64/Packages", component)
 }
 
 type craftdeckVersionResponse struct {
