@@ -1195,6 +1195,24 @@
 		}
 		replaceState(url, {});
 	}
+
+	// 전역 설정 탭 안의 2차 분류: 외부 접속/Velocity/도메인 연결처럼 "밖에서
+	// 어떻게 들어오는지"에 관한 항목은 network로, 스왑/오버클럭처럼 이
+	// 라즈베리파이 자체의 자원을 다루는 항목은 hardware로 묶는다. 같은
+	// ?subtab= 쿼리 패턴으로 새로고침해도 유지된다.
+	let settingsSubTab = $state<'network' | 'hardware'>(
+		$page.url.searchParams.get('subtab') === 'hardware' ? 'hardware' : 'network'
+	);
+	function setSettingsSubTab(tab: 'network' | 'hardware') {
+		settingsSubTab = tab;
+		const url = new URL(window.location.href);
+		if (tab === 'network') {
+			url.searchParams.delete('subtab');
+		} else {
+			url.searchParams.set('subtab', tab);
+		}
+		replaceState(url, {});
+	}
 </script>
 
 <main class="bg-background text-foreground flex flex-col p-8 lg:h-screen lg:overflow-hidden">
@@ -1340,7 +1358,25 @@
 			{/each}
 			</div>
 			{:else}
-			<div class="space-y-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-3">
+			<div class="flex gap-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+			<div class="flex w-32 shrink-0 flex-col gap-1">
+				<button
+					class="rounded-md px-3 py-2 text-left text-sm {settingsSubTab === 'network'
+						? 'bg-muted font-medium'
+						: 'text-muted-foreground'}"
+					onclick={() => setSettingsSubTab('network')}>네트워크</button
+				>
+				<button
+					class="rounded-md px-3 py-2 text-left text-sm {settingsSubTab === 'hardware'
+						? 'bg-muted font-medium'
+						: 'text-muted-foreground'}"
+					onclick={() => setSettingsSubTab('hardware')}>하드웨어</button
+				>
+			</div>
+
+			<div class="border-border flex-1 border-l pl-6 lg:min-h-0 lg:overflow-y-auto lg:pr-3">
+			{#if settingsSubTab === 'network'}
+			<div class="space-y-4">
 			{#if proxyStatus?.exists}
 				<VelocityProxyCard
 					{proxyStatus}
@@ -1361,6 +1397,20 @@
 				{instances}
 			/>
 
+			<DomainConnectionCard
+				{domainConfig}
+				bind:domainForm
+				{domainSaving}
+				{domainError}
+				{domainTokenRequired}
+				onKindChange={onDomainKindChange}
+				onSave={saveDomainSettings}
+				onUnregister={unregisterDomain}
+				onOpenCloudflareGuide={() => (showCloudflareGuide = true)}
+			/>
+			</div>
+			{:else}
+			<div class="space-y-4">
 			{#if swapInfo === null || swapInfo.supported}
 				<SwapCard
 					{swapInfo}
@@ -1388,18 +1438,9 @@
 				onStartBenchmark={startBenchmark}
 				onRevertOverclock={revertOverclock}
 			/>
-
-			<DomainConnectionCard
-				{domainConfig}
-				bind:domainForm
-				{domainSaving}
-				{domainError}
-				{domainTokenRequired}
-				onKindChange={onDomainKindChange}
-				onSave={saveDomainSettings}
-				onUnregister={unregisterDomain}
-				onOpenCloudflareGuide={() => (showCloudflareGuide = true)}
-			/>
+			</div>
+			{/if}
+			</div>
 			</div>
 			{/if}
 		</div>
