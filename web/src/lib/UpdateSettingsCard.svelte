@@ -50,30 +50,50 @@
 		<div class="mt-2 grid grid-cols-2 gap-2">
 			<div>
 				<label class="text-muted-foreground mb-1 block text-xs" for="update-channel">채널</label>
-				<select
-					id="update-channel"
-					bind:value={form.channel}
-					class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
-				>
-					<option value="stable">stable</option>
-					<option value="beta">beta</option>
-					<option value="canary">canary</option>
-				</select>
+				<div class="relative">
+					<select
+						id="update-channel"
+						bind:value={form.channel}
+						class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-3 pr-8 text-sm"
+					>
+						<option value="stable">stable</option>
+						<option value="beta">beta</option>
+						<option value="canary">canary</option>
+					</select>
+					<svg
+						class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
+						viewBox="0 0 20 20"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.5"
+						><path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round" /></svg
+					>
+				</div>
 			</div>
 			<div>
 				<label class="text-muted-foreground mb-1 block text-xs" for="update-frequency"
 					>확인 주기</label
 				>
-				<select
-					id="update-frequency"
-					bind:value={form.check_frequency}
-					class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
-				>
-					<option value="every_visit">접속마다</option>
-					<option value="daily">매일</option>
-					<option value="weekly">매주</option>
-					<option value="monthly">매달</option>
-				</select>
+				<div class="relative">
+					<select
+						id="update-frequency"
+						bind:value={form.check_frequency}
+						class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-3 pr-8 text-sm"
+					>
+						<option value="every_visit">접속마다</option>
+						<option value="daily">매일</option>
+						<option value="weekly">매주</option>
+						<option value="monthly">매달</option>
+					</select>
+					<svg
+						class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
+						viewBox="0 0 20 20"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.5"
+						><path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round" /></svg
+					>
+				</div>
 			</div>
 		</div>
 
