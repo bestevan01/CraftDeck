@@ -80,6 +80,15 @@
 					업데이트 중입니다. 잠깐 재시작되지만, 이미 실행 중인 마인크래프트 서버들은 영향받지
 					않습니다. 완료되면 자동으로 새로고침됩니다.
 				</p>
+				<!-- 실제 설치 진행률(%)은 apt가 제공하지 않아 알 수 없다 -- 그냥
+					멈춘 게 아니라 계속 진행 중이라는 걸 보여주는 막연한 로딩
+					스피너. -->
+				<div class="mt-3 flex items-center gap-2">
+					<div
+						class="border-muted-foreground/30 border-t-primary h-4 w-4 shrink-0 animate-spin rounded-full border-2"
+					></div>
+					<span class="text-muted-foreground text-xs">설치 중...</span>
+				</div>
 			{:else}
 				<p class="text-muted-foreground mt-2 text-sm">
 					업데이트 중 잠깐 재시작되지만, 이미 실행 중인 마인크래프트 서버들은 영향받지 않습니다.
