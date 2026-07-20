@@ -20,6 +20,13 @@
 		error: string;
 		onSave: () => void;
 	} = $props();
+
+	const checkFrequencyLabels: Record<string, string> = {
+		every_visit: '접속마다',
+		daily: '매일',
+		weekly: '매주',
+		monthly: '매달'
+	};
 </script>
 
 <div class="border-border bg-card mt-6 rounded-lg border p-4">
@@ -76,7 +83,8 @@
 		{/if}
 
 		<p class="text-muted-foreground mt-2 text-xs">
-			현재 채널: {settings.channel} · 확인 주기: {settings.check_frequency}
+			현재 채널: {settings.channel} · 확인 주기: {checkFrequencyLabels[settings.check_frequency] ??
+				settings.check_frequency}
 		</p>
 	{/if}
 </div>
