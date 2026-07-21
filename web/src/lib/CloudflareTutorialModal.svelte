@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { t } from '$lib/i18n';
+
 	// Cloudflare는 실제 화면을 iframe으로 CraftDeck 안에 띄울 수 없어서(대부분의
 	// 로그인 화면이 X-Frame-Options로 막혀 있음), 아래 네 단계는 실제 Cloudflare
 	// 대시보드를 축약해 재현한 정적 목업이다 -- 스크린샷이 아니라 재현인 이유는
@@ -57,10 +59,10 @@
 		>
 			<div class="border-border shrink-0 border-b p-4 pb-3">
 				<div class="flex items-center justify-between">
-					<h2 class="font-medium">Cloudflare 연동</h2>
+					<h2 class="font-medium">{$t('cloudflareTutorialModal.header.title')}</h2>
 					<button
 						type="button"
-						aria-label="닫기"
+						aria-label={$t('cloudflareTutorialModal.header.close')}
 						class="text-muted-foreground text-sm"
 						onclick={() => (open = false)}
 					>
@@ -68,19 +70,19 @@
 					</button>
 				</div>
 				<p class="text-muted-foreground mt-1 text-xs">
-					아래 화면을 그대로 따라 하면서 도메인 하나로 범위를 제한한 API 토큰을 발급받으세요.
+					{$t('cloudflareTutorialModal.header.description')}
 				</p>
 			</div>
 
 			<div class="flex flex-col gap-5 overflow-y-auto p-4">
 				<p class="text-muted-foreground border-border rounded-md border border-dashed p-3 text-xs leading-relaxed">
-					소유한 도메인이 없다면 먼저 구매하시고, 아직 Cloudflare에 등록하지 않았다면
+					{$t('cloudflareTutorialModal.intro.before')}
 					<a
 						href="https://developers.cloudflare.com/fundamentals/manage-domains/add-site/"
 						target="_blank"
 						rel="noreferrer"
-						class="text-foreground underline">Cloudflare에 사이트 추가</a
-					>로 도메인을 먼저 연결하세요 (네임서버를 Cloudflare로 변경). 아래 단계는 그다음부터입니다.
+						class="text-foreground underline">{$t('cloudflareTutorialModal.intro.linkText')}</a
+					>{$t('cloudflareTutorialModal.intro.after')}
 				</p>
 				<div class="flex items-start gap-3">
 					<div class="w-56 shrink-0 overflow-hidden rounded-md border border-neutral-300 bg-white">
@@ -95,7 +97,9 @@
 						</div>
 						<div class="relative p-2">
 							<div class="mb-1.5 flex items-center justify-end gap-1.5">
-								<span class="text-[8px] text-neutral-500">지원</span>
+								<span class="text-[8px] text-neutral-500"
+									>{$t('cloudflareTutorialModal.mockup.support')}</span
+								>
 								<div class="h-4 w-4 rounded-full bg-neutral-300"></div>
 							</div>
 							<div
@@ -104,24 +108,34 @@
 								<div
 									class="border-l-2 border-blue-500 bg-blue-50 px-2 py-1 text-[8px] font-medium text-neutral-900"
 								>
-									프로필
+									{$t('cloudflareTutorialModal.mockup.profile')}
 								</div>
-								<div class="px-2 py-1 text-[8px] text-neutral-600">청구</div>
-								<div class="px-2 py-1 text-[8px] text-neutral-600">모양새</div>
-								<div class="px-2 py-1 text-[8px] text-neutral-600">언어</div>
-								<div class="px-2 py-1 text-[8px] text-neutral-600">표준 시간대</div>
+								<div class="px-2 py-1 text-[8px] text-neutral-600">
+									{$t('cloudflareTutorialModal.mockup.billing')}
+								</div>
+								<div class="px-2 py-1 text-[8px] text-neutral-600">
+									{$t('cloudflareTutorialModal.mockup.appearance')}
+								</div>
+								<div class="px-2 py-1 text-[8px] text-neutral-600">
+									{$t('cloudflareTutorialModal.mockup.language')}
+								</div>
+								<div class="px-2 py-1 text-[8px] text-neutral-600">
+									{$t('cloudflareTutorialModal.mockup.timezone')}
+								</div>
 								<div class="border-t border-neutral-100 px-2 py-1 text-[8px] text-orange-600">
-									로그아웃
+									{$t('cloudflareTutorialModal.mockup.logout')}
 								</div>
 							</div>
 							<div class="h-24"></div>
 						</div>
 					</div>
 					<div class="pt-0.5">
-						<div class="text-sm font-medium">1. 오른쪽 위 프로필 아이콘 클릭</div>
+						<div class="text-sm font-medium">{$t('cloudflareTutorialModal.step1.title')}</div>
 						<div class="text-muted-foreground mt-1 text-xs leading-relaxed">
-							Cloudflare 대시보드에 로그인한 뒤, 오른쪽 위 원형 아이콘을 눌러 뜨는 메뉴에서
-							<span class="text-foreground font-medium">프로필</span>을 선택하세요.
+							{$t('cloudflareTutorialModal.step1.descBefore')}
+							<span class="text-foreground font-medium"
+								>{$t('cloudflareTutorialModal.step1.descHighlight')}</span
+							>{$t('cloudflareTutorialModal.step1.descAfter')}
 						</div>
 					</div>
 				</div>
@@ -139,30 +153,42 @@
 						</div>
 						<div class="flex">
 							<div class="w-16 border-r border-neutral-100 bg-neutral-50 py-2">
-								<div class="px-2 py-1 text-[8px] text-neutral-500">설정</div>
-								<div class="px-2 py-1 text-[8px] text-neutral-500">액세스 관리</div>
+								<div class="px-2 py-1 text-[8px] text-neutral-500">
+									{$t('cloudflareTutorialModal.mockup.settings')}
+								</div>
+								<div class="px-2 py-1 text-[8px] text-neutral-500">
+									{$t('cloudflareTutorialModal.mockup.accessManagement')}
+								</div>
 								<div
 									class="border-l-2 border-blue-500 bg-blue-50 px-2 py-1 text-[8px] font-medium text-neutral-900"
 								>
-									API 토큰
+									{$t('cloudflareTutorialModal.mockup.apiTokens')}
 								</div>
 							</div>
 							<div class="flex-1 p-2">
-								<div class="mb-1.5 text-[9px] font-medium text-neutral-900">사용자 API 토큰</div>
+								<div class="mb-1.5 text-[9px] font-medium text-neutral-900">
+									{$t('cloudflareTutorialModal.mockup.userApiTokens')}
+								</div>
 								<div
 									class="inline-block rounded bg-blue-600 px-2 py-1 text-[8px] font-medium text-white"
 								>
-									+ 토큰 생성
+									{$t('cloudflareTutorialModal.mockup.createTokenButton')}
 								</div>
 							</div>
 						</div>
 					</div>
 					<div class="pt-0.5">
-						<div class="text-sm font-medium">2. API 토큰 탭에서 토큰 생성</div>
+						<div class="text-sm font-medium">{$t('cloudflareTutorialModal.step2.title')}</div>
 						<div class="text-muted-foreground mt-1 text-xs leading-relaxed">
-							왼쪽 메뉴의 <span class="text-foreground font-medium">API 토큰</span> 탭으로 이동한 뒤,
-							오른쪽 위 파란색 <span class="text-foreground font-medium">+ 토큰 생성</span> 버튼을
-							누르세요.
+							{$t('cloudflareTutorialModal.step2.descBefore')}
+							<span class="text-foreground font-medium"
+								>{$t('cloudflareTutorialModal.step2.descHighlight1')}</span
+							>
+							{$t('cloudflareTutorialModal.step2.descMid')}
+							<span class="text-foreground font-medium"
+								>{$t('cloudflareTutorialModal.step2.descHighlight2')}</span
+							>
+							{$t('cloudflareTutorialModal.step2.descAfter')}
 						</div>
 					</div>
 				</div>
@@ -179,29 +205,39 @@
 							>
 						</div>
 						<div class="p-2">
-							<div class="mb-1.5 text-[9px] font-medium text-neutral-900">API 토큰 템플릿</div>
+							<div class="mb-1.5 text-[9px] font-medium text-neutral-900">
+								{$t('cloudflareTutorialModal.mockup.apiTokenTemplate')}
+							</div>
 							<div
 								class="mb-1 flex items-center justify-between rounded border-2 border-blue-500 bg-blue-50 p-1.5"
 							>
-								<div class="text-[8.5px] font-medium text-neutral-900">영역 DNS 편집</div>
-								<div class="rounded bg-blue-600 px-1.5 py-0.5 text-[7px] text-white">템플릿 사용</div>
+								<div class="text-[8.5px] font-medium text-neutral-900">
+									{$t('cloudflareTutorialModal.mockup.editZoneDns')}
+								</div>
+								<div class="rounded bg-blue-600 px-1.5 py-0.5 text-[7px] text-white">
+									{$t('cloudflareTutorialModal.mockup.useTemplate')}
+								</div>
 							</div>
 							<div
 								class="flex items-center justify-between rounded border border-neutral-200 p-1.5 text-[8px] text-neutral-600"
 							>
-								<span>청구 정보 읽기</span>
+								<span>{$t('cloudflareTutorialModal.mockup.readBilling')}</span>
 								<span class="rounded bg-neutral-200 px-1.5 py-0.5 text-[7px] text-neutral-600"
-									>템플릿 사용</span
+									>{$t('cloudflareTutorialModal.mockup.useTemplate')}</span
 								>
 							</div>
 						</div>
 					</div>
 					<div class="pt-0.5">
-						<div class="text-sm font-medium">3. 영역 DNS 편집 템플릿 선택</div>
+						<div class="text-sm font-medium">{$t('cloudflareTutorialModal.step3.title')}</div>
 						<div class="text-muted-foreground mt-1 text-xs leading-relaxed">
-							템플릿 목록에서 <span class="text-foreground font-medium">영역 DNS 편집</span>을 찾아
-							오른쪽의 <span class="text-foreground font-medium">템플릿 사용</span>을 누르세요.
-							CraftDeck이 DNS 레코드만 관리할 수 있도록 딱 필요한 권한만 담긴 템플릿입니다.
+							{$t('cloudflareTutorialModal.step3.descBefore')}
+							<span class="text-foreground font-medium"
+								>{$t('cloudflareTutorialModal.step3.descHighlight1')}</span
+							>{$t('cloudflareTutorialModal.step3.descMid')}
+							<span class="text-foreground font-medium"
+								>{$t('cloudflareTutorialModal.step3.descHighlight2')}</span
+							>{$t('cloudflareTutorialModal.step3.descAfter')}
 						</div>
 					</div>
 				</div>
@@ -218,13 +254,15 @@
 							>
 						</div>
 						<div class="p-2">
-							<div class="mb-1.5 text-[9px] font-medium text-neutral-900">영역 리소스</div>
+							<div class="mb-1.5 text-[9px] font-medium text-neutral-900">
+								{$t('cloudflareTutorialModal.mockup.zoneResources')}
+							</div>
 							<div class="mb-1 flex gap-1">
 								<div class="flex-1 rounded border border-neutral-200 p-1 text-[7.5px] text-neutral-900">
-									포함
+									{$t('cloudflareTutorialModal.mockup.included')}
 								</div>
 								<div class="flex-1 rounded border border-neutral-200 p-1 text-[7.5px] text-neutral-900">
-									특정 영역
+									{$t('cloudflareTutorialModal.mockup.specificZone')}
 								</div>
 							</div>
 							<div
@@ -235,16 +273,19 @@
 							<div
 								class="mt-1.5 inline-block rounded bg-blue-600 px-2 py-1 text-[8px] font-medium text-white"
 							>
-								토큰 생성
+								{$t('cloudflareTutorialModal.mockup.generateToken')}
 							</div>
 						</div>
 					</div>
 					<div class="flex-1 pt-0.5">
-						<div class="text-sm font-medium">4. 영역 리소스를 도메인 하나로 제한 후 발급</div>
+						<div class="text-sm font-medium">{$t('cloudflareTutorialModal.step4.title')}</div>
 						<div class="text-muted-foreground mt-1 mb-2 text-xs leading-relaxed">
-							<span class="text-foreground font-medium">포함 / 특정 영역</span>을 선택하고 드롭다운에서
-							아래 입력한 도메인을 고른 뒤 <span class="text-foreground font-medium">토큰 생성</span>을
-							누르면 토큰 값이 화면에 딱 한 번 표시됩니다. 그 값을 복사해서 아래에 붙여넣으세요.
+							<span class="text-foreground font-medium"
+								>{$t('cloudflareTutorialModal.step4.descHighlight1')}</span
+							>{$t('cloudflareTutorialModal.step4.descMid')}
+							<span class="text-foreground font-medium"
+								>{$t('cloudflareTutorialModal.step4.descHighlight2')}</span
+							>{$t('cloudflareTutorialModal.step4.descAfter')}
 						</div>
 						<a
 							href="https://dash.cloudflare.com/profile/api-tokens"
@@ -252,25 +293,25 @@
 							rel="noreferrer"
 							class="border-border mb-3 inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs"
 						>
-							Cloudflare에서 토큰 발급하기 ↗
+							{$t('cloudflareTutorialModal.step4.linkText')}
 						</a>
 						<label class="text-muted-foreground mb-1 block text-xs" for="cf-tutorial-hostname"
-							>도메인</label
+							>{$t('cloudflareTutorialModal.step4.hostnameLabel')}</label
 						>
 						<input
 							id="cf-tutorial-hostname"
 							type="text"
-							placeholder="예: craftdeck.cc"
+							placeholder={$t('cloudflareTutorialModal.step4.hostnamePlaceholder')}
 							bind:value={domainForm.hostname}
 							class="border-input bg-background mb-2 w-full rounded-md border px-3 py-1.5 text-sm"
 						/>
 						<label class="text-muted-foreground mb-1 block text-xs" for="cf-tutorial-token"
-							>API 토큰</label
+							>{$t('cloudflareTutorialModal.step4.tokenLabel')}</label
 						>
 						<input
 							id="cf-tutorial-token"
 							type="password"
-							placeholder="발급받은 토큰을 붙여넣으세요"
+							placeholder={$t('cloudflareTutorialModal.step4.tokenPlaceholder')}
 							bind:value={domainForm.token}
 							class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
 						/>
@@ -288,7 +329,7 @@
 					class="border-border rounded-md border px-4 py-2 text-sm font-medium"
 					onclick={() => (open = false)}
 				>
-					나중에
+					{$t('cloudflareTutorialModal.footer.later')}
 				</button>
 				<button
 					type="button"
@@ -296,7 +337,9 @@
 					disabled={domainSaving || !domainForm.hostname.trim() || !domainForm.token.trim()}
 					onclick={confirm}
 				>
-					{domainSaving ? '연결 중...' : '확인하고 연결'}
+					{domainSaving
+						? $t('cloudflareTutorialModal.footer.connecting')
+						: $t('cloudflareTutorialModal.footer.confirm')}
 				</button>
 			</div>
 		</div>

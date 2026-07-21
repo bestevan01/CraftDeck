@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { UpdateSettings } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	// stable/beta/canary 구독 채널 + 업데이트 확인 주기. 채널을 바꾸면
 	// 백엔드가 /etc/apt/sources.list.d/craftdeck.list를 재작성하고
@@ -27,29 +28,32 @@
 		onCheckNow: () => void;
 	} = $props();
 
-	const checkFrequencyLabels: Record<string, string> = {
-		every_visit: '접속마다',
-		daily: '매일',
-		weekly: '매주',
-		monthly: '매달'
-	};
+	const checkFrequencyLabels = $derived<Record<string, string>>({
+		every_visit: $t('updateSettingsCard.frequencyEveryVisit'),
+		daily: $t('updateSettingsCard.frequencyDaily'),
+		weekly: $t('updateSettingsCard.frequencyWeekly'),
+		monthly: $t('updateSettingsCard.frequencyMonthly')
+	});
 </script>
 
 <div class="border-border bg-card mt-6 rounded-lg border p-4">
-	<h2 class="font-medium">업데이트 설정</h2>
+	<h2 class="font-medium">{$t('updateSettingsCard.title')}</h2>
 	<p class="text-muted-foreground mt-1 text-xs">
-		구독할 채널과 업데이트 확인 주기를 정합니다. beta/canary는 stable보다 먼저 새 기능을 받아볼 수
-		있지만 덜 검증된 빌드일 수 있습니다.
+		{$t('updateSettingsCard.description')}
 	</p>
 
 	{#if fetchError}
-		<p class="text-destructive mt-2 text-xs">불러오지 못했습니다: {fetchError}</p>
+		<p class="text-destructive mt-2 text-xs">
+			{$t('updateSettingsCard.fetchError', { error: fetchError })}
+		</p>
 	{:else if !settings}
-		<p class="text-muted-foreground mt-2 text-xs">불러오는 중...</p>
+		<p class="text-muted-foreground mt-2 text-xs">{$t('updateSettingsCard.loading')}</p>
 	{:else}
 		<div class="mt-2 grid grid-cols-2 gap-2">
 			<div>
-				<label class="text-muted-foreground mb-1 block text-xs" for="update-channel">채널</label>
+				<label class="text-muted-foreground mb-1 block text-xs" for="update-channel"
+					>{$t('updateSettingsCard.channelLabel')}</label
+				>
 				<div class="relative">
 					<select
 						id="update-channel"
@@ -72,7 +76,7 @@
 			</div>
 			<div>
 				<label class="text-muted-foreground mb-1 block text-xs" for="update-frequency"
-					>확인 주기</label
+					>{$t('updateSettingsCard.frequencyLabel')}</label
 				>
 				<div class="relative">
 					<select
@@ -80,10 +84,10 @@
 						bind:value={form.check_frequency}
 						class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-3 pr-8 text-sm"
 					>
-						<option value="every_visit">접속마다</option>
-						<option value="daily">매일</option>
-						<option value="weekly">매주</option>
-						<option value="monthly">매달</option>
+						<option value="every_visit">{$t('updateSettingsCard.frequencyEveryVisit')}</option>
+						<option value="daily">{$t('updateSettingsCard.frequencyDaily')}</option>
+						<option value="weekly">{$t('updateSettingsCard.frequencyWeekly')}</option>
+						<option value="monthly">{$t('updateSettingsCard.frequencyMonthly')}</option>
 					</select>
 					<svg
 						class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
@@ -102,15 +106,17 @@
 			disabled={saving}
 			onclick={onSave}
 		>
-			{saving ? '적용 중...' : '적용'}
+			{saving ? $t('updateSettingsCard.applying') : $t('updateSettingsCard.apply')}
 		</button>
 		{#if error}
 			<p class="text-destructive mt-2 text-xs">{error}</p>
 		{/if}
 
 		<p class="text-muted-foreground mt-2 text-xs">
-			현재 채널: {settings.channel} · 확인 주기: {checkFrequencyLabels[settings.check_frequency] ??
-				settings.check_frequency}
+			{$t('updateSettingsCard.currentStatus', {
+				channel: settings.channel,
+				frequency: checkFrequencyLabels[settings.check_frequency] ?? settings.check_frequency
+			})}
 		</p>
 
 		<div class="border-border mt-3 border-t pt-3">
@@ -119,7 +125,7 @@
 				disabled={checkingNow}
 				onclick={onCheckNow}
 			>
-				{checkingNow ? '확인 중...' : '지금 확인'}
+				{checkingNow ? $t('updateSettingsCard.checkingNow') : $t('updateSettingsCard.checkNow')}
 			</button>
 			{#if checkNowMessage}
 				<p class="text-muted-foreground mt-2 text-xs">{checkNowMessage}</p>

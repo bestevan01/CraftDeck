@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ServerSetting } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	let {
 		open,
@@ -23,12 +24,23 @@
 		onClose: () => void;
 	} = $props();
 
-	const enumOptionLabels: Record<string, Record<string, string>> = {
-		difficulty: { peaceful: '평화로움', easy: '쉬움', normal: '보통', hard: '어려움' },
-		gamemode: { survival: '서바이벌', creative: '크리에이티브', adventure: '어드벤처', spectator: '관전자' }
+	const enumOptionKeys: Record<string, Record<string, string>> = {
+		difficulty: {
+			peaceful: 'gameSettingsModal.difficulty.peaceful',
+			easy: 'gameSettingsModal.difficulty.easy',
+			normal: 'gameSettingsModal.difficulty.normal',
+			hard: 'gameSettingsModal.difficulty.hard'
+		},
+		gamemode: {
+			survival: 'gameSettingsModal.gamemode.survival',
+			creative: 'gameSettingsModal.gamemode.creative',
+			adventure: 'gameSettingsModal.gamemode.adventure',
+			spectator: 'gameSettingsModal.gamemode.spectator'
+		}
 	};
 	function enumOptionLabel(settingKey: string, value: string) {
-		return enumOptionLabels[settingKey]?.[value] ?? value;
+		const key = enumOptionKeys[settingKey]?.[value];
+		return key ? $t(key) : value;
 	}
 
 	let pressedBackdrop = false;
@@ -53,17 +65,17 @@
 			class="bg-card border-border flex max-h-[80vh] w-full max-w-2xl flex-col rounded-lg border p-4 shadow-lg"
 		>
 			<div class="mb-1 flex shrink-0 items-center justify-between">
-				<h2 class="font-medium">게임플레이 설정</h2>
+				<h2 class="font-medium">{$t('gameSettingsModal.title')}</h2>
 				<button type="button" class="text-muted-foreground text-sm" onclick={onClose}>&times;</button>
 			</div>
 			<p class="text-muted-foreground mb-3 shrink-0 text-xs">
-				변경 사항은 서버를 재시작해야 적용됩니다. 여기 없는 세부 설정은 파일 탭에서
-				<code>server.properties</code>를 직접 편집하세요.
+				{$t('gameSettingsModal.descriptionPre')}
+				<code>server.properties</code>{$t('gameSettingsModal.descriptionPost')}
 			</p>
 			{#if loading}
-				<p class="text-muted-foreground text-xs">불러오는 중...</p>
+				<p class="text-muted-foreground text-xs">{$t('gameSettingsModal.loading')}</p>
 			{:else if error && settings.length === 0}
-				<p class="text-destructive text-xs">설정을 불러오지 못했습니다: {error}</p>
+				<p class="text-destructive text-xs">{$t('gameSettingsModal.loadError', { error })}</p>
 			{:else}
 				<div class="min-h-0 flex-1 overflow-y-auto">
 					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -94,8 +106,8 @@
 											bind:value={edits[setting.key]}
 											class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-3 pr-8 text-sm"
 										>
-											<option value="true">켜짐</option>
-											<option value="false">꺼짐</option>
+											<option value="true">{$t('gameSettingsModal.boolOn')}</option>
+											<option value="false">{$t('gameSettingsModal.boolOff')}</option>
 										</select>
 										<svg
 											class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
@@ -149,14 +161,14 @@
 					<p class="text-destructive mt-2 shrink-0 text-xs">{error}</p>
 				{/if}
 				{#if saved}
-					<p class="mt-2 shrink-0 text-xs text-green-500">저장됐습니다. 다시 시작하면 적용됩니다.</p>
+					<p class="mt-2 shrink-0 text-xs text-green-500">{$t('gameSettingsModal.saved')}</p>
 				{/if}
 				<button
 					class="border-border mt-3 shrink-0 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
 					disabled={saving}
 					onclick={onSave}
 				>
-					{saving ? '저장 중...' : '저장'}
+					{saving ? $t('gameSettingsModal.saving') : $t('gameSettingsModal.save')}
 				</button>
 			{/if}
 		</div>

@@ -28,6 +28,7 @@
 	import ConsoleTab from '$lib/ConsoleTab.svelte';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { replaceState } from '$app/navigation';
+	import { t } from '$lib/i18n';
 
 	// Shared by every destructive action on this page (see ConfirmDialog.svelte
 	// for why this replaced the browser's native confirm()).
@@ -120,11 +121,11 @@
 	function statusLabel(status: Instance['status']) {
 		return (
 			{
-				stopped: '중지됨',
-				starting: '시작 중',
-				running: '실행 중',
-				stopping: '종료 중',
-				crashed: '비정상 종료'
+				stopped: $t('instanceDetailPage.status.stopped'),
+				starting: $t('instanceDetailPage.status.starting'),
+				running: $t('instanceDetailPage.status.running'),
+				stopping: $t('instanceDetailPage.status.stopping'),
+				crashed: $t('instanceDetailPage.status.crashed')
 			}[status] ?? status
 		);
 	}
@@ -165,7 +166,9 @@
 	// Mirrors modrinthProjectType in internal/api/handlers_plugin.go -- just
 	// the label, since the API calls are identical either way.
 	function pluginTabLabel(loader: string | undefined) {
-		return loader === 'fabric' || loader === 'neoforge' ? '모드' : '플러그인';
+		return loader === 'fabric' || loader === 'neoforge'
+			? $t('instanceDetailPage.pluginTab.mode')
+			: $t('instanceDetailPage.pluginTab.plugin');
 	}
 
 	// Sending an RCON command while the server is mid-shutdown (its main
@@ -287,7 +290,7 @@
 		if (line.startsWith('> ')) {
 			return { prefix: '', message: line, messageClass: 'text-cyan-400 font-semibold' };
 		}
-		if (line.startsWith('[오류]')) {
+		if (line.startsWith($t('instanceDetailPage.console.errorPrefix'))) {
 			return { prefix: '', message: line, messageClass: 'text-red-400' };
 		}
 		const m = line.match(logLineRE);
@@ -313,7 +316,11 @@
 				appendLine(frame.line);
 			} else if (frame.type === 'cmd_result') {
 				appendLine(`> ${frame.command}`);
-				appendLine(frame.ok ? frame.line : `[오류] ${frame.error}`);
+				appendLine(
+					frame.ok
+						? frame.line
+						: `${$t('instanceDetailPage.console.errorPrefix')} ${frame.error}`
+				);
 			}
 		};
 	}
@@ -330,7 +337,11 @@
 					appendLine(`> ${command}`);
 					appendLine(res.result);
 				})
-				.catch((err) => appendLine(`[오류] ${err instanceof Error ? err.message : err}`));
+				.catch((err) =>
+					appendLine(
+						`${$t('instanceDetailPage.console.errorPrefix')} ${err instanceof Error ? err.message : err}`
+					)
+				);
 		}
 	}
 
@@ -681,9 +692,12 @@
 	}
 
 	function deleteEntry(entry: FileEntry) {
-		const label = entry.is_dir ? '폴더(안의 모든 내용 포함)' : '파일';
-		askConfirm(`이 ${label}을(를) 삭제할까요? 되돌릴 수 없습니다.\n\n${entry.path}`, () =>
-			doDeleteEntry(entry)
+		const label = entry.is_dir
+			? $t('instanceDetailPage.files.deleteEntryLabel.folder')
+			: $t('instanceDetailPage.files.deleteEntryLabel.file');
+		askConfirm(
+			$t('instanceDetailPage.files.deleteConfirm', { label, path: entry.path }),
+			() => doDeleteEntry(entry)
 		);
 	}
 
@@ -718,10 +732,7 @@
 	}
 
 	function restoreBackup(backupId: string) {
-		askConfirm(
-			'이 백업으로 복원하면 현재 월드/설정이 백업 시점 상태로 전부 대체됩니다. 계속할까요?',
-			() => doRestoreBackup(backupId)
-		);
+		askConfirm($t('instanceDetailPage.backups.restoreConfirm'), () => doRestoreBackup(backupId));
 	}
 
 	async function doRestoreBackup(backupId: string) {
@@ -736,7 +747,7 @@
 	}
 
 	function deleteBackup(backupId: string) {
-		askConfirm('이 백업을 삭제할까요?', () => doDeleteBackup(backupId));
+		askConfirm($t('instanceDetailPage.backups.deleteConfirm'), () => doDeleteBackup(backupId));
 	}
 
 	async function doDeleteBackup(backupId: string) {
@@ -802,7 +813,9 @@
 			const result = await api.importWorld(id, importFile, force);
 			importFile = null;
 			importForceConfirm = false;
-			importSuccess = `가져오기 완료 (감지된 버전: ${result.detected_version || '알 수 없음'}). 서버를 시작하면 반영됩니다.`;
+			importSuccess = $t('instanceDetailPage.world.importSuccess', {
+				version: result.detected_version || $t('instanceDetailPage.world.unknownVersion')
+			});
 			await refreshWorldInfo();
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -906,7 +919,9 @@
 	}
 
 	function deletePlugin(p: Plugin) {
-		askConfirm(`${p.filename}을(를) 삭제할까요?`, () => doDeletePlugin(p));
+		askConfirm($t('instanceDetailPage.plugins.deleteConfirm', { filename: p.filename }), () =>
+			doDeletePlugin(p)
+		);
 	}
 
 	async function doDeletePlugin(p: Plugin) {
@@ -1025,7 +1040,9 @@
 	});
 
 	let domainAddressLabel = $derived(
-		domainConfig?.kind === 'free_subdomain' ? 'DuckDNS/ipTime 주소' : '도메인'
+		domainConfig?.kind === 'free_subdomain'
+			? $t('instanceDetailPage.network.domainLabelFree')
+			: $t('instanceDetailPage.network.domainLabelDefault')
 	);
 
 	async function loadNetworkAddresses() {
@@ -1091,10 +1108,7 @@
 	}
 
 	function unregisterFromProxy() {
-		askConfirm(
-			'이 서버를 프록시에서 빼고 독립 노출로 전환할까요? 서버를 재시작해야 실제로 적용됩니다.',
-			doUnregisterFromProxy
-		);
+		askConfirm($t('instanceDetailPage.proxy.unregisterConfirm'), doUnregisterFromProxy);
 	}
 
 	async function doUnregisterFromProxy() {
@@ -1245,32 +1259,40 @@
 <main class="bg-background text-foreground flex flex-col p-8 lg:h-screen lg:overflow-hidden">
 	<div class="flex items-center justify-between">
 		<div>
-			<a href="/" class="text-muted-foreground text-sm hover:underline">&larr; 목록으로</a>
+			<a href="/" class="text-muted-foreground text-sm hover:underline"
+				>{$t('instanceDetailPage.header.backToList')}</a
+			>
 			<h1 class="mt-1 text-2xl font-semibold">{inst?.name ?? id}</h1>
 			{#if inst}
 				<p class="text-muted-foreground text-xs">
-					{loaderLabel(inst.loader)} · {inst.mc_version} · 상태 {statusLabel(inst.status)}
+					{$t('instanceDetailPage.header.statusLine', {
+						loader: loaderLabel(inst.loader),
+						version: inst.mc_version,
+						status: statusLabel(inst.status)
+					})}
 					{#if inst.kind === 'proxy'}
-						· 접속 포트 {inst.game_port}
+						{$t('instanceDetailPage.header.connectPort', { port: inst.game_port })}
 					{:else if subdomain && !subdomain.registered}
-						· 접속 포트 {inst.game_port}
+						{$t('instanceDetailPage.header.connectPort', { port: inst.game_port })}
 					{/if}
 				</p>
 			{/if}
 		</div>
 		<div class="flex gap-2">
 			<button class="border-border rounded-md border px-3 py-1.5 text-sm" onclick={start}
-				>시작</button
+				>{$t('instanceDetailPage.buttons.start')}</button
 			>
 			<button
 				class="border-border rounded-md border px-3 py-1.5 text-sm"
 				disabled={restarting}
 				onclick={restartForSettings}
 			>
-				{restarting ? '재시작 중...' : '재시작'}
+				{restarting
+					? $t('instanceDetailPage.buttons.restarting')
+					: $t('instanceDetailPage.buttons.restart')}
 			</button>
 			<button class="border-border rounded-md border px-3 py-1.5 text-sm" onclick={stop}
-				>종료</button
+				>{$t('instanceDetailPage.buttons.stop')}</button
 			>
 		</div>
 	</div>
@@ -1284,13 +1306,13 @@
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'console'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => setActiveTab('console')}>콘솔</button
+			onclick={() => setActiveTab('console')}>{$t('instanceDetailPage.tabs.console')}</button
 		>
 		<button
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'manage'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => setActiveTab('manage')}>서버 관리</button
+			onclick={() => setActiveTab('manage')}>{$t('instanceDetailPage.tabs.manage')}</button
 		>
 		{#if inst && uploadCapableLoader(inst.loader)}
 			<button
@@ -1308,7 +1330,7 @@
 				onclick={() => {
 					setActiveTab('files');
 					refreshFiles();
-				}}>파일</button
+				}}>{$t('instanceDetailPage.tabs.files')}</button
 			>
 		{/if}
 	</div>

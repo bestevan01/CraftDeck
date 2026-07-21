@@ -24,6 +24,8 @@
 	// container's right/bottom edges instead of wrapping the whole card
 	// (confirmed on real hardware). A fixed-position sibling outside that
 	// container has no such ancestor clipping it.
+	import { t } from '$lib/i18n';
+
 	let {
 		steps,
 		open = $bindable(false),
@@ -185,13 +187,15 @@
 				{/each}
 			</div>
 			<div class="flex gap-2">
-				<button type="button" class="text-muted-foreground text-xs" onclick={finish}>건너뛰기</button>
+				<button type="button" class="text-muted-foreground text-xs" onclick={finish}
+					>{$t('tourOverlay.skip')}</button
+				>
 				<button
 					type="button"
 					class="bg-primary text-primary-foreground rounded-md px-2.5 py-1 text-xs font-medium"
 					onclick={advance}
 				>
-					{index === steps.length - 1 ? '완료' : '다음'}
+					{index === steps.length - 1 ? $t('tourOverlay.finish') : $t('tourOverlay.next')}
 				</button>
 			</div>
 		</div>

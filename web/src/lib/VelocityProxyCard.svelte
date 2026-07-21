@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ProxyStatus } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	// The always-on Velocity proxy's version is picked once, at creation,
 	// and never re-checked afterward (see ensureProxyInstance) -- so it can
@@ -20,22 +21,23 @@
 </script>
 
 <div class="border-border bg-card rounded-lg border p-4">
-	<h2 class="font-medium">Velocity 프록시</h2>
-	<p class="text-muted-foreground mt-2 text-xs">현재 버전: {proxyStatus.current_version}</p>
+	<h2 class="font-medium">{$t('velocityProxyCard.title')}</h2>
+	<p class="text-muted-foreground mt-2 text-xs">
+		{$t('velocityProxyCard.currentVersion', { version: proxyStatus.current_version ?? '' })}
+	</p>
 	{#if proxyStatus.update_available}
 		<p class="mt-1 text-xs text-yellow-500">
-			최신 버전 {proxyStatus.latest_version} 사용 가능 (새 마인크래프트 프로토콜 지원이 추가됐을 수
-			있습니다)
+			{$t('velocityProxyCard.updateAvailable', { latest: proxyStatus.latest_version ?? '' })}
 		</p>
 		<button
 			disabled={upgrading}
 			onclick={onUpgrade}
 			class="border-border mt-2 rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
 		>
-			{upgrading ? '업데이트 중... (프록시가 잠시 재시작됩니다)' : '프록시 업데이트'}
+			{upgrading ? $t('velocityProxyCard.upgrading') : $t('velocityProxyCard.upgrade')}
 		</button>
 	{:else}
-		<p class="text-muted-foreground mt-1 text-xs">최신 버전입니다.</p>
+		<p class="text-muted-foreground mt-1 text-xs">{$t('velocityProxyCard.upToDate')}</p>
 	{/if}
 	{#if upgradeError}
 		<p class="text-destructive mt-2 text-xs">{upgradeError}</p>

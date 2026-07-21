@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { BuildInfo } from '$lib/api';
 	import MemorySlider from '$lib/MemorySlider.svelte';
+	import { t } from '$lib/i18n';
 
 	type Loader =
 		| 'vanilla'
@@ -93,7 +94,7 @@
 			class="border-border bg-card max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border p-4 shadow-lg"
 		>
 			<div class="mb-3 flex items-center justify-between">
-				<h2 class="font-medium">서버 만들기</h2>
+				<h2 class="font-medium">{$t('createInstanceModal.title')}</h2>
 				<button type="button" class="text-muted-foreground text-sm" onclick={() => (open = false)}
 					>&times;</button
 				>
@@ -106,7 +107,7 @@
 				}}
 			>
 				<div>
-					<label class="mb-1 block text-sm font-medium" for="name">이름</label>
+					<label class="mb-1 block text-sm font-medium" for="name">{$t('createInstanceModal.nameLabel')}</label>
 					<input
 						id="name"
 						required
@@ -116,7 +117,7 @@
 					/>
 				</div>
 				<div>
-					<label class="mb-1 block text-sm font-medium" for="loader">구동기</label>
+					<label class="mb-1 block text-sm font-medium" for="loader">{$t('createInstanceModal.loaderLabel')}</label>
 					<div class="relative">
 						<select
 							id="loader"
@@ -132,7 +133,7 @@
 							<option value="leaf">Leaf</option>
 							<option value="fabric">Fabric</option>
 							<option value="neoforge">NeoForge</option>
-							<option value="custom">커스텀 (직접 업로드)</option>
+							<option value="custom">{$t('createInstanceModal.loaderCustomOption')}</option>
 						</select>
 						<svg
 							class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
@@ -146,18 +147,17 @@
 				</div>
 				{#if form.loader === 'custom'}
 					<div>
-						<label class="mb-1 block text-sm font-medium" for="custom-loader-name">구동기 이름</label>
+						<label class="mb-1 block text-sm font-medium" for="custom-loader-name">{$t('createInstanceModal.customLoaderNameLabel')}</label>
 						<input
 							id="custom-loader-name"
 							type="text"
 							required
 							bind:value={customLoaderName}
-							placeholder="예: MyModpackServer"
+							placeholder={$t('createInstanceModal.customLoaderNamePlaceholder')}
 							class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
 						/>
 						<p class="text-muted-foreground mt-1 text-xs">
-							목록에 없는 구동기의 jar 파일을 직접 올려 서버를 만듭니다. 자동 다운로드/버전 목록
-							조회/플러그인·모드 검색은 지원되지 않고, 파일 탭에서 직접 관리해야 합니다.
+							{$t('createInstanceModal.customLoaderDescription')}
 						</p>
 					</div>
 				{/if}
@@ -165,38 +165,36 @@
 					<label class="flex items-start gap-2 text-sm">
 						<input type="checkbox" bind:checked={form.expose_independently} class="mt-1" />
 						<span>
-							독립적으로 외부에 노출 (기본은 항상 켜져 있는 Velocity 프록시 뒤에 자동 등록되며,
-							게임 포트는 내부용으로만 쓰입니다)
+							{$t('createInstanceModal.exposeIndependently')}
 						</span>
 					</label>
 					{#if form.loader === 'fabric' || form.loader === 'neoforge'}
 						<p class="text-muted-foreground -mt-2 text-xs">
-							⚠ 엔티티·블록 상태 등 바닐라 패킷 구조 자체를 변형하는 모드(예: Create)는 Velocity와
-							호환되지 않아 접속이 끊길 수 있습니다. 이런 모드를 쓸 계획이면 독립 노출을 체크하세요.
+							{$t('createInstanceModal.modIncompatibilityWarning')}
 						</p>
 					{/if}
 				{:else}
 					<p class="text-muted-foreground text-xs">
-						이 구동기는 프록시의 모던 포워딩을 지원하지 않아 항상 독립적으로 노출됩니다.
+						{$t('createInstanceModal.noProxyForwarding')}
 					</p>
 				{/if}
 				<div>
-					<label class="mb-1 block text-sm font-medium" for="mc_version">마인크래프트 버전</label>
+					<label class="mb-1 block text-sm font-medium" for="mc_version">{$t('createInstanceModal.mcVersionLabel')}</label>
 					{#if form.loader === 'custom'}
 						<input
 							id="mc_version"
 							type="text"
 							required
 							bind:value={form.mc_version}
-							placeholder="예: 1.20.1 (Java 버전 자동 선택에 쓰입니다)"
+							placeholder={$t('createInstanceModal.mcVersionCustomPlaceholder')}
 							class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
 						/>
 					{:else if mcVersionsError}
 						<p class="text-destructive text-xs">
-							버전 목록을 불러오지 못했습니다: {mcVersionsError}
+							{$t('createInstanceModal.mcVersionsFetchError', { error: mcVersionsError })}
 						</p>
 					{:else if availableVersionIds.length === 0}
-						<p class="text-muted-foreground text-xs">버전 목록 불러오는 중...</p>
+						<p class="text-muted-foreground text-xs">{$t('createInstanceModal.mcVersionsLoading')}</p>
 					{:else}
 						<div class="relative">
 							<select
@@ -222,14 +220,14 @@
 				</div>
 				{#if buildListerLoaders.includes(form.loader) && buildOptions.length > 0}
 					<div>
-						<label class="mb-1 block text-sm font-medium" for="loader_version">빌드 (선택사항)</label>
+						<label class="mb-1 block text-sm font-medium" for="loader_version">{$t('createInstanceModal.buildLabel')}</label>
 						<div class="relative">
 							<select
 								id="loader_version"
 								bind:value={form.loader_version}
 								class="border-input bg-background w-full appearance-none rounded-md border py-2 pl-3 pr-8 text-sm"
 							>
-								<option value="">최신</option>
+								<option value="">{$t('createInstanceModal.buildLatest')}</option>
 								{#each buildOptions as build (build.id)}
 									<option value={build.id}>
 										{build.id}{build.channel ? ` (${build.channel})` : ''}
@@ -247,11 +245,11 @@
 						</div>
 					</div>
 				{:else if buildListerLoaders.includes(form.loader) && buildsError}
-					<p class="text-muted-foreground text-xs">빌드 목록을 불러오지 못했습니다: {buildsError}</p>
+					<p class="text-muted-foreground text-xs">{$t('createInstanceModal.buildsFetchError', { error: buildsError })}</p>
 				{/if}
 				{#if form.loader === 'custom'}
 					<div>
-						<label class="mb-1 block text-sm font-medium" for="custom-jar">구동기 jar 파일</label>
+						<label class="mb-1 block text-sm font-medium" for="custom-jar">{$t('createInstanceModal.customJarLabel')}</label>
 						<input
 							id="custom-jar"
 							type="file"
@@ -264,15 +262,23 @@
 				{/if}
 				<div>
 					<label class="mb-1 block text-sm font-medium" for="create-memory">
-						최대 메모리 ({form.memory_gb}GB / 최대 {maxMemoryGB}GB{#if ramBoundaryGB < maxMemoryGB}<span
-								class="text-yellow-500"> · 스왑 {maxMemoryGB - ramBoundaryGB}GB 포함</span
+						{$t('createInstanceModal.memoryLabel', {
+							memory: form.memory_gb,
+							maxMemory: maxMemoryGB
+						})}{#if ramBoundaryGB < maxMemoryGB}<span class="text-yellow-500"
+								>{$t('createInstanceModal.swapIncluded', { swap: maxMemoryGB - ramBoundaryGB })}</span
 							>{/if})
 					</label>
 					<MemorySlider id="create-memory" bind:value={form.memory_gb} maxGB={maxMemoryGB} {ramBoundaryGB} />
 				</div>
 				<div>
 					<label class="mb-1 block text-sm font-medium" for="create-cpu">
-						CPU 할당량 ({form.cpu_quota_percent > 0 ? `${form.cpu_quota_percent}%` : '무제한'})
+						{$t('createInstanceModal.cpuLabel', {
+							cpu:
+								form.cpu_quota_percent > 0
+									? `${form.cpu_quota_percent}%`
+									: $t('createInstanceModal.cpuUnlimited')
+						})}
 					</label>
 					<input
 						id="create-cpu"
@@ -286,7 +292,7 @@
 				</div>
 				<div>
 					<label class="mb-1 block text-sm font-medium" for="world-file"
-						>월드 데이터 가져오기 (선택, tar.gz)</label
+						>{$t('createInstanceModal.worldFileLabel')}</label
 					>
 					<input
 						id="world-file"
@@ -298,19 +304,19 @@
 					{#if worldFile}
 						<label class="mt-1 flex items-center gap-2 text-xs">
 							<input type="checkbox" bind:checked={worldFileForce} />
-							<span>업로드한 월드가 이 인스턴스보다 최신 버전이어도 강제로 적용</span>
+							<span>{$t('createInstanceModal.worldFileForce')}</span>
 						</label>
 					{/if}
 				</div>
 				<label class="flex items-start gap-2 text-sm">
 					<input type="checkbox" required bind:checked={form.accept_eula} class="mt-1" />
 					<span>
-						마인크래프트 <a
+						{$t('createInstanceModal.eulaAgree')} <a
 							class="underline"
 							href="https://www.minecraft.net/eula"
 							target="_blank"
 							rel="noreferrer">EULA</a
-						>에 동의합니다.
+						>{$t('createInstanceModal.eulaAgreeSuffix')}
 					</span>
 				</label>
 				{#if createError}
@@ -321,7 +327,7 @@
 					disabled={creating}
 					class="bg-primary text-primary-foreground w-full rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
 				>
-					{creating ? '생성 중... (jar 다운로드 포함)' : '생성'}
+					{creating ? $t('createInstanceModal.creating') : $t('createInstanceModal.create')}
 				</button>
 			</form>
 		</div>

@@ -6,6 +6,8 @@
 	// availableMemoryMB in both +page.svelte and instances/[id]/+page.svelte).
 	// Without this marker, dragging past physical RAM into swap looked
 	// identical to staying within it, even though swap is much slower.
+	import { t } from '$lib/i18n';
+
 	let {
 		id,
 		value = $bindable(),
@@ -30,7 +32,7 @@
 		<div
 			class="pointer-events-none absolute top-1/2 h-3 w-0.5 -translate-y-1/2 bg-yellow-500"
 			style="left: {boundaryPercent}%"
-			title="물리 RAM 한도: 이 지점부터는 스왑(디스크)을 씁니다"
+			title={$t('memorySlider.boundaryTitle')}
 		></div>
 	{/if}
 </div>

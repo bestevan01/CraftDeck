@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PluginSearchHit } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	let {
 		open = $bindable(false),
@@ -45,7 +46,7 @@
 			class="bg-card border-border flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border p-4 shadow-lg"
 		>
 			<div class="mb-3 flex items-center justify-between">
-				<h2 class="font-medium">Modrinth에서 {loaderLabel} 검색</h2>
+				<h2 class="font-medium">{$t('pluginSearchModal.title', { loaderLabel })}</h2>
 				<button type="button" class="text-muted-foreground text-sm" onclick={() => (open = false)}
 					>&times;</button
 				>
@@ -53,7 +54,7 @@
 			<form class="flex gap-2" onsubmit={onSearch}>
 				<input
 					bind:value={query}
-					placeholder="{loaderLabel} 이름"
+					placeholder={$t('pluginSearchModal.searchPlaceholder', { loaderLabel })}
 					class="border-input bg-background w-full min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"
 				/>
 				<button
@@ -61,7 +62,7 @@
 					disabled={searching}
 					class="border-border shrink-0 rounded-md border px-3 py-1.5 text-sm"
 				>
-					{searching ? '검색 중...' : '검색'}
+					{searching ? $t('pluginSearchModal.searching') : $t('pluginSearchModal.search')}
 				</button>
 			</form>
 			{#if error}
@@ -75,7 +76,7 @@
 						<div class="min-w-0">
 							<span class="font-medium">{hit.title}</span>
 							<span class="text-muted-foreground ml-2">
-								다운로드 {hit.downloads.toLocaleString()}
+								{$t('pluginSearchModal.downloads', { count: hit.downloads.toLocaleString() })}
 							</span>
 							<p class="text-muted-foreground truncate">{hit.description}</p>
 						</div>
@@ -84,7 +85,9 @@
 							disabled={installingProjectId === hit.project_id}
 							onclick={() => onInstall(hit.project_id)}
 						>
-							{installingProjectId === hit.project_id ? '설치 중...' : '설치'}
+							{installingProjectId === hit.project_id
+								? $t('pluginSearchModal.installing')
+								: $t('pluginSearchModal.install')}
 						</button>
 					</div>
 				{/each}

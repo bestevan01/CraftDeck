@@ -5,8 +5,17 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { locale } from '$lib/i18n';
 
 	let { children } = $props();
+
+	// app.html hardcodes lang="ko" as the pre-hydration default (matches this
+	// project's original all-Korean UI) -- once the locale store picks up a
+	// browser-detected or saved override, keep the actual <html lang> in
+	// sync with it.
+	$effect(() => {
+		document.documentElement.lang = $locale;
+	});
 	// Gate every route except /login behind a valid session (requirements.md
 	// FR-32). /login handles its own status check (setup vs. login form) and
 	// its own redirect back to "/" once authenticated, so it's excluded here

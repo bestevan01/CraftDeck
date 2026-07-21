@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { OVERCLOCK_PRESETS, type BenchmarkStatus, type HardwareInfo } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	// Active Cooler가 실제로 붙어있는지 확인된 경우에만 오버클럭 조작이
 	// 가능하다 (internal/hardware.DetectActiveCooler) -- 감지 안 된 경우에도
@@ -37,27 +38,25 @@
 </script>
 
 <div class="border-border bg-card rounded-lg border p-4">
-	<h2 class="font-medium">오버클럭</h2>
+	<h2 class="font-medium">{$t('overclockCard.title')}</h2>
 	<p class="text-muted-foreground mt-1 text-xs">
-		공식 Active Cooler가 실제로 장착된 게 확인된 경우에만 사용할 수 있습니다. 적용하면 곧바로
-		재부팅까지 진행되며(실행 중인 서버는 먼저 안전하게 종료됩니다), 이후 안정성 테스트로
-		언더볼트/쓰로틀링 없이 동작하는지 직접 확인할 수 있습니다.
+		{$t('overclockCard.description')}
 	</p>
 
 	{#if hardwareFetchError}
-		<p class="text-destructive mt-2 text-xs">상태를 불러오지 못했습니다: {hardwareFetchError}</p>
+		<p class="text-destructive mt-2 text-xs">{$t('overclockCard.fetchError', { error: hardwareFetchError })}</p>
 	{:else if !hardwareInfo}
-		<p class="text-muted-foreground mt-2 text-xs">불러오는 중...</p>
+		<p class="text-muted-foreground mt-2 text-xs">{$t('overclockCard.loading')}</p>
 	{:else if !hardwareInfo.cooler_detected}
 		<p class="text-muted-foreground mt-2 text-xs">
-			Active Cooler가 감지되지 않았습니다. 쿨러를 장착한 뒤 다시 감지해보세요.
+			{$t('overclockCard.coolerNotDetected')}
 		</p>
 		<button
 			class="border-border mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
 			disabled={redetecting}
 			onclick={onRedetect}
 		>
-			{redetecting ? '감지 중...' : '다시 감지'}
+			{redetecting ? $t('overclockCard.redetecting') : $t('overclockCard.redetect')}
 		</button>
 	{:else}
 		<div class="mt-2 flex gap-2">
@@ -66,11 +65,11 @@
 					bind:value={overclockForm.preset}
 					class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-3 pr-8 text-sm"
 				>
-					<option value="__none__">사용 안 함 (기본값)</option>
+					<option value="__none__">{$t('overclockCard.presetNone')}</option>
 					{#each OVERCLOCK_PRESETS.filter((p) => p.name !== 'default') as p (p.name)}
 						<option value={p.name}>{p.label} ({p.arm_freq_mhz}MHz)</option>
 					{/each}
-					<option value="custom">커스텀</option>
+					<option value="custom">{$t('overclockCard.presetCustom')}</option>
 				</select>
 				<svg
 					class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
@@ -86,7 +85,7 @@
 		{#if overclockForm.preset === 'custom'}
 			<div class="mt-2 grid grid-cols-2 gap-2">
 				<div>
-					<label class="text-muted-foreground mb-1 block text-xs" for="oc-arm-freq">클럭 (MHz)</label>
+					<label class="text-muted-foreground mb-1 block text-xs" for="oc-arm-freq">{$t('overclockCard.clockLabel')}</label>
 					<input
 						id="oc-arm-freq"
 						type="number"
@@ -99,7 +98,7 @@
 				</div>
 				<div>
 					<label class="text-muted-foreground mb-1 block text-xs" for="oc-over-voltage"
-						>전압 오프셋 (µV)</label
+						>{$t('overclockCard.voltageOffsetLabel')}</label
 					>
 					<input
 						id="oc-over-voltage"
@@ -119,11 +118,11 @@
 			disabled={overclockSaving || rebooting}
 			onclick={onApplyOverclock}
 		>
-			{rebooting ? '재부팅 중...' : overclockSaving ? '적용 중...' : '적용 후 재부팅'}
+			{rebooting ? $t('overclockCard.rebooting') : overclockSaving ? $t('overclockCard.applying') : $t('overclockCard.applyAndReboot')}
 		</button>
 		{#if rebooting}
 			<p class="text-muted-foreground mt-2 text-xs">
-				재부팅 중입니다. 완료되면 자동으로 새로고침됩니다.
+				{$t('overclockCard.rebootingNotice')}
 			</p>
 		{/if}
 		{#if overclockError}
@@ -132,17 +131,22 @@
 
 		{#if hardwareInfo.overclock_enabled}
 			<p class="text-muted-foreground mt-2 text-xs">
-				현재 적용됨: 클럭 {hardwareInfo.overclock_arm_freq}MHz · 전압 오프셋 +{hardwareInfo.overclock_over_voltage_delta}µV
+				{$t('overclockCard.currentApplied', {
+					armFreq: hardwareInfo.overclock_arm_freq ?? 0,
+					voltageDelta: hardwareInfo.overclock_over_voltage_delta ?? 0
+				})}
 			</p>
 		{/if}
 
 		<div class="border-border mt-3 border-t pt-3">
-			<h3 class="text-sm font-medium">안정성 테스트</h3>
+			<h3 class="text-sm font-medium">{$t('overclockCard.stabilityTest')}</h3>
 			{#if benchmarkStatus?.running}
 				<p class="text-muted-foreground mt-1 text-xs">
-					진행 중... {benchmarkStatus.elapsed_sec}/{benchmarkStatus.total_sec}초, 현재 온도 {benchmarkStatus.current_temp_c.toFixed(
-						1
-					)}°C
+					{$t('overclockCard.testInProgress', {
+						elapsed: benchmarkStatus.elapsed_sec,
+						total: benchmarkStatus.total_sec,
+						temp: benchmarkStatus.current_temp_c.toFixed(1)
+					})}
 				</p>
 			{:else}
 				<button
@@ -150,32 +154,38 @@
 					disabled={benchmarkStarting}
 					onclick={onStartBenchmark}
 				>
-					{benchmarkStarting ? '시작 중...' : '테스트 시작 (약 90초)'}
+					{benchmarkStarting ? $t('overclockCard.startingTest') : $t('overclockCard.startTest')}
 				</button>
 				{#if benchmarkStatus?.result === 'pass' || benchmarkStatus?.result === 'fail'}
 					<p class="text-muted-foreground mt-2 text-xs">
-						온도 평균 {benchmarkStatus.avg_temp_c.toFixed(1)}°C · 최저 {benchmarkStatus.min_temp_c.toFixed(
-							1
-						)}°C · 최고 {benchmarkStatus.max_temp_c.toFixed(1)}°C
+						{$t('overclockCard.tempSummary', {
+							avg: benchmarkStatus.avg_temp_c.toFixed(1),
+							min: benchmarkStatus.min_temp_c.toFixed(1),
+							max: benchmarkStatus.max_temp_c.toFixed(1)
+						})}
 					</p>
 				{/if}
 				{#if benchmarkStatus?.result === 'pass'}
 					<p class="mt-2 text-xs text-green-500">
-						통과 — 언더볼트/쓰로틀링 없이 안정적으로 동작했습니다.
+						{$t('overclockCard.testPass')}
 					</p>
 				{:else if benchmarkStatus?.result === 'fail'}
 					<p class="text-destructive mt-2 text-xs">
-						실패 — {benchmarkStatus.under_voltage_detected ? '언더볼트' : ''}
-						{benchmarkStatus.under_voltage_detected && benchmarkStatus.throttled_detected ? ' / ' : ''}
-						{benchmarkStatus.throttled_detected ? '쓰로틀링' : ''}이 감지됐습니다. 값을 낮추거나
-						되돌리는 걸 권장합니다.
+						{$t('overclockCard.testFailMessage', {
+							issues: [
+								benchmarkStatus.under_voltage_detected ? $t('overclockCard.testFailUnderVoltage') : '',
+								benchmarkStatus.throttled_detected ? $t('overclockCard.testFailThrottled') : ''
+							]
+								.filter(Boolean)
+								.join(' / ')
+						})}
 					</p>
 					<button
 						class="border-border text-destructive mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
 						disabled={overclockSaving || rebooting}
 						onclick={onRevertOverclock}
 					>
-						안전한 값으로 되돌리기
+						{$t('overclockCard.revertToSafe')}
 					</button>
 				{/if}
 			{/if}

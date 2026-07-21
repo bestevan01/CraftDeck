@@ -1,0 +1,70 @@
+export const messages = {
+	ko: {
+		'instanceDetailPage.header.backToList': '← 목록으로',
+		'instanceDetailPage.header.statusLine': '{loader} · {version} · 상태 {status}',
+		'instanceDetailPage.header.connectPort': '· 접속 포트 {port}',
+		'instanceDetailPage.buttons.start': '시작',
+		'instanceDetailPage.buttons.restarting': '재시작 중...',
+		'instanceDetailPage.buttons.restart': '재시작',
+		'instanceDetailPage.buttons.stop': '종료',
+		'instanceDetailPage.tabs.console': '콘솔',
+		'instanceDetailPage.tabs.manage': '서버 관리',
+		'instanceDetailPage.tabs.files': '파일',
+		'instanceDetailPage.status.stopped': '중지됨',
+		'instanceDetailPage.status.starting': '시작 중',
+		'instanceDetailPage.status.running': '실행 중',
+		'instanceDetailPage.status.stopping': '종료 중',
+		'instanceDetailPage.status.crashed': '비정상 종료',
+		'instanceDetailPage.pluginTab.mode': '모드',
+		'instanceDetailPage.pluginTab.plugin': '플러그인',
+		'instanceDetailPage.files.deleteEntryLabel.folder': '폴더(안의 모든 내용 포함)',
+		'instanceDetailPage.files.deleteEntryLabel.file': '파일',
+		'instanceDetailPage.files.deleteConfirm': '이 {label}을(를) 삭제할까요? 되돌릴 수 없습니다.\n\n{path}',
+		'instanceDetailPage.backups.restoreConfirm':
+			'이 백업으로 복원하면 현재 월드/설정이 백업 시점 상태로 전부 대체됩니다. 계속할까요?',
+		'instanceDetailPage.backups.deleteConfirm': '이 백업을 삭제할까요?',
+		'instanceDetailPage.plugins.deleteConfirm': '{filename}을(를) 삭제할까요?',
+		'instanceDetailPage.proxy.unregisterConfirm':
+			'이 서버를 프록시에서 빼고 독립 노출로 전환할까요? 서버를 재시작해야 실제로 적용됩니다.',
+		'instanceDetailPage.world.importSuccess':
+			'가져오기 완료 (감지된 버전: {version}). 서버를 시작하면 반영됩니다.',
+		'instanceDetailPage.world.unknownVersion': '알 수 없음',
+		'instanceDetailPage.network.domainLabelFree': 'DuckDNS/ipTime 주소',
+		'instanceDetailPage.network.domainLabelDefault': '도메인',
+		'instanceDetailPage.console.errorPrefix': '[오류]'
+	},
+	en: {
+		'instanceDetailPage.header.backToList': '← Back to list',
+		'instanceDetailPage.header.statusLine': '{loader} · {version} · Status {status}',
+		'instanceDetailPage.header.connectPort': '· Connect port {port}',
+		'instanceDetailPage.buttons.start': 'Start',
+		'instanceDetailPage.buttons.restarting': 'Restarting...',
+		'instanceDetailPage.buttons.restart': 'Restart',
+		'instanceDetailPage.buttons.stop': 'Stop',
+		'instanceDetailPage.tabs.console': 'Console',
+		'instanceDetailPage.tabs.manage': 'Server Management',
+		'instanceDetailPage.tabs.files': 'Files',
+		'instanceDetailPage.status.stopped': 'Stopped',
+		'instanceDetailPage.status.starting': 'Starting',
+		'instanceDetailPage.status.running': 'Running',
+		'instanceDetailPage.status.stopping': 'Stopping',
+		'instanceDetailPage.status.crashed': 'Crashed',
+		'instanceDetailPage.pluginTab.mode': 'Mods',
+		'instanceDetailPage.pluginTab.plugin': 'Plugins',
+		'instanceDetailPage.files.deleteEntryLabel.folder': 'folder (including all its contents)',
+		'instanceDetailPage.files.deleteEntryLabel.file': 'file',
+		'instanceDetailPage.files.deleteConfirm': 'Delete this {label}? This cannot be undone.\n\n{path}',
+		'instanceDetailPage.backups.restoreConfirm':
+			"Restoring this backup will replace the current world/settings entirely with the backup's state. Continue?",
+		'instanceDetailPage.backups.deleteConfirm': 'Delete this backup?',
+		'instanceDetailPage.plugins.deleteConfirm': 'Delete {filename}?',
+		'instanceDetailPage.proxy.unregisterConfirm':
+			'Remove this server from the proxy and switch to standalone exposure? A restart is required for this to take effect.',
+		'instanceDetailPage.world.importSuccess':
+			'Import complete (detected version: {version}). Changes take effect when the server starts.',
+		'instanceDetailPage.world.unknownVersion': 'Unknown',
+		'instanceDetailPage.network.domainLabelFree': 'DuckDNS/ipTime Address',
+		'instanceDetailPage.network.domainLabelDefault': 'Domain',
+		'instanceDetailPage.console.errorPrefix': '[Error]'
+	}
+};

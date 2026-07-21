@@ -2,6 +2,7 @@
 	import { api } from '$lib/api';
 	import { untrack } from 'svelte';
 	import CopyButton from '$lib/CopyButton.svelte';
+	import { t } from '$lib/i18n';
 
 	// FR-38/39: 2단계 인증 등록/현황 -- 계정 설정 모달과 분리된 별도 모달로,
 	// 그 모달의 버튼에서 열린다.
@@ -129,7 +130,7 @@
 			class="border-border bg-card max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border p-4 shadow-lg"
 		>
 			<div class="mb-3 flex items-center justify-between">
-				<h2 class="font-medium">2단계 인증</h2>
+				<h2 class="font-medium">{$t('twoFactorModal.title')}</h2>
 				<button type="button" class="text-muted-foreground text-sm" onclick={() => (open = false)}
 					>&times;</button
 				>
@@ -139,10 +140,10 @@
 				이미 켜져 있으면 재설정 대신 안내와 백업 코드 재발급/끄기를
 				보여준다 (setupTOTP이 409를 반환하므로 백엔드와 일관됨). -->
 			{#if justDisabled}
-				<p class="text-sm">2단계 인증이 꺼졌습니다.</p>
+				<p class="text-sm">{$t('twoFactorModal.disabledNotice')}</p>
 			{:else if totpEnabled && !totpBackupCodes}
 				<p class="text-muted-foreground text-sm">
-					이미 설정되어 있습니다. 인증 앱을 분실했다면 로그인 시 백업 코드를 대신 사용하세요.
+					{$t('twoFactorModal.alreadySetupNotice')}
 				</p>
 				<button
 					type="button"
@@ -150,7 +151,7 @@
 					disabled={regenerating}
 					onclick={regenerateBackupCodes}
 				>
-					{regenerating ? '재발급 중...' : '백업 코드 재발급'}
+					{regenerating ? $t('twoFactorModal.regenerating') : $t('twoFactorModal.regenerateBackupCodes')}
 				</button>
 				{#if regenerateError}
 					<p class="text-destructive mt-2 text-xs">{regenerateError}</p>
@@ -162,12 +163,12 @@
 						class="border-border text-destructive mt-2 w-full rounded-md border px-3 py-1.5 text-xs"
 						onclick={() => (showDisableForm = true)}
 					>
-						2단계 인증 끄기
+						{$t('twoFactorModal.disable')}
 					</button>
 				{:else}
 					<form class="mt-2 space-y-2" onsubmit={submitDisable}>
 						<label class="text-muted-foreground block text-xs" for="totp-disable-password"
-							>비밀번호 확인</label
+							>{$t('twoFactorModal.passwordConfirmLabel')}</label
 						>
 						<input
 							id="totp-disable-password"
@@ -186,21 +187,21 @@
 								class="border-border flex-1 rounded-md border px-3 py-1.5 text-xs"
 								onclick={() => (showDisableForm = false)}
 							>
-								취소
+								{$t('twoFactorModal.cancel')}
 							</button>
 							<button
 								type="submit"
 								disabled={disabling}
 								class="bg-destructive text-destructive-foreground flex-1 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
 							>
-								{disabling ? '끄는 중...' : '끄기'}
+								{disabling ? $t('twoFactorModal.disabling') : $t('twoFactorModal.disableConfirm')}
 							</button>
 						</div>
 					</form>
 				{/if}
 			{:else if totpBackupCodes}
 				<p class="text-sm">
-					설정 완료됐습니다. 아래 백업 코드를 안전한 곳에 저장하세요. 다시 볼 수 없습니다.
+					{$t('twoFactorModal.setupCompleteNotice')}
 				</p>
 				<div class="border-border bg-background mt-2 grid grid-cols-2 gap-1 rounded-md border p-3">
 					{#each totpBackupCodes as code (code)}
@@ -208,26 +209,27 @@
 					{/each}
 				</div>
 				<div class="mt-2 flex justify-end">
-					<CopyButton text={totpBackupCodes.join('\n')} label="모두 복사" />
+					<CopyButton text={totpBackupCodes.join('\n')} label={$t('twoFactorModal.copyAll')} />
 				</div>
 			{:else if startingTOTPSetup}
-				<p class="text-muted-foreground text-sm">준비 중...</p>
+				<p class="text-muted-foreground text-sm">{$t('twoFactorModal.preparing')}</p>
 			{:else}
 				<p class="text-muted-foreground text-sm">
-					인증 앱(Google Authenticator, Authy 등)으로 아래 QR 코드를 스캔하세요.
+					{$t('twoFactorModal.scanQrNotice')}
 				</p>
 				{#if totpQrCode}
-					<img src={totpQrCode} alt="2FA QR 코드" class="mx-auto mt-3 h-48 w-48" />
+					<img src={totpQrCode} alt={$t('twoFactorModal.qrAlt')} class="mx-auto mt-3 h-48 w-48" />
 				{/if}
 				{#if totpSecret}
 					<p class="text-muted-foreground mt-2 text-center text-xs">
-						QR을 스캔할 수 없다면 직접 입력: <code class="break-all">{totpSecret}</code>
+						{$t('twoFactorModal.manualEntryNotice')}
+						<code class="break-all">{totpSecret}</code>
 					</p>
 				{/if}
 				<form class="mt-4 space-y-4" onsubmit={submitTOTPVerify}>
 					<div>
 						<label class="mb-1 block text-sm font-medium" for="totp-verify-code"
-							>인증 앱의 6자리 코드</label
+							>{$t('twoFactorModal.verifyCodeLabel')}</label
 						>
 						<input
 							id="totp-verify-code"
@@ -246,7 +248,7 @@
 						disabled={verifyingTOTP}
 						class="bg-primary text-primary-foreground w-full rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
 					>
-						{verifyingTOTP ? '확인 중...' : '확인 후 활성화'}
+						{verifyingTOTP ? $t('twoFactorModal.verifying') : $t('twoFactorModal.verifyAndActivate')}
 					</button>
 				</form>
 			{/if}

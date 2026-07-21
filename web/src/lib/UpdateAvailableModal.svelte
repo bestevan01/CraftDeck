@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	// craftdeckd 자체의 새 버전 안내 + 실제 업데이트 실행. 이 프로세스가
 	// 업데이트 도중 재시작되는 걸 감안해서(postinst의 restart-on-upgrade
@@ -42,7 +43,7 @@
 			if (Date.now() > deadline) {
 				clearInterval(interval);
 				updating = false;
-				updateError = '60초가 지나도 응답이 없습니다. 잠시 후 페이지를 직접 새로고침해보세요.';
+				updateError = $t('updateAvailableModal.timeoutError');
 				return;
 			}
 			try {
@@ -71,14 +72,13 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="border-border bg-card w-full max-w-sm rounded-lg border p-4 shadow-lg">
-			<h2 class="font-medium">CraftDeck 새 버전이 있습니다</h2>
+			<h2 class="font-medium">{$t('updateAvailableModal.title')}</h2>
 			<p class="text-muted-foreground mt-2 text-sm">
-				현재 버전 {currentVersion} → 최신 버전 {latestVersion}
+				{$t('updateAvailableModal.versionInfo', { current: currentVersion, latest: latestVersion })}
 			</p>
 			{#if updating}
 				<p class="text-muted-foreground mt-2 text-sm">
-					업데이트 중입니다. 잠깐 재시작되지만, 이미 실행 중인 마인크래프트 서버들은 영향받지
-					않습니다. 완료되면 자동으로 새로고침됩니다.
+					{$t('updateAvailableModal.updatingDescription')}
 				</p>
 				<!-- 실제 설치 진행률(%)은 apt가 제공하지 않아 알 수 없다 -- 그냥
 					멈춘 게 아니라 계속 진행 중이라는 걸 보여주는 막연한 로딩
@@ -87,11 +87,11 @@
 					<div
 						class="border-muted-foreground/30 border-t-primary h-4 w-4 shrink-0 animate-spin rounded-full border-2"
 					></div>
-					<span class="text-muted-foreground text-xs">설치 중...</span>
+					<span class="text-muted-foreground text-xs">{$t('updateAvailableModal.installing')}</span>
 				</div>
 			{:else}
 				<p class="text-muted-foreground mt-2 text-sm">
-					업데이트 중 잠깐 재시작되지만, 이미 실행 중인 마인크래프트 서버들은 영향받지 않습니다.
+					{$t('updateAvailableModal.description')}
 				</p>
 			{/if}
 			{#if updateError}
@@ -104,7 +104,7 @@
 						class="border-border flex-1 rounded-md border px-4 py-2 text-sm font-medium"
 						onclick={() => (open = false)}
 					>
-						나중에
+						{$t('updateAvailableModal.later')}
 					</button>
 				{/if}
 				<button
@@ -113,7 +113,7 @@
 					disabled={updating}
 					onclick={startUpdate}
 				>
-					{updating ? '업데이트 중...' : '지금 업데이트'}
+					{updating ? $t('updateAvailableModal.updatingButton') : $t('updateAvailableModal.updateNow')}
 				</button>
 			</div>
 		</div>

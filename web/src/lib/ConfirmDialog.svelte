@@ -7,12 +7,14 @@
 	// custom modals -- confirmed as an actual inconsistency worth fixing,
 	// not just a style nit, since operators had to learn two different
 	// "are you sure" patterns in the same app.
+	import { t } from '$lib/i18n';
+
 	let {
 		open = $bindable(false),
-		title = '확인',
+		title = $t('confirmDialog.defaultTitle'),
 		message,
-		confirmLabel = '확인',
-		cancelLabel = '취소',
+		confirmLabel = $t('confirmDialog.defaultConfirmLabel'),
+		cancelLabel = $t('confirmDialog.defaultCancelLabel'),
 		danger = true,
 		onconfirm
 	}: {

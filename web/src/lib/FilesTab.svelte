@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { FileEntry } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	let {
 		uploadingFiles,
@@ -80,20 +81,20 @@
 
 <div class="border-border bg-card rounded-lg border p-4">
 	<div class="flex items-center justify-between">
-		<h2 class="font-medium">파일</h2>
+		<h2 class="font-medium">{$t('filesTab.title')}</h2>
 		<label
 			class="border-border cursor-pointer rounded-md border px-3 py-1.5 text-xs {uploadingFiles
 				? 'opacity-50'
 				: ''}"
 		>
-			{uploadingFiles ? '업로드 중...' : '업로드'}
+			{uploadingFiles ? $t('filesTab.uploading') : $t('filesTab.upload')}
 			<input type="file" multiple class="hidden" disabled={uploadingFiles} onchange={onFilePickerChange} />
 		</label>
 	</div>
 
 	<!-- Breadcrumb -->
 	<div class="text-muted-foreground mt-2 flex flex-wrap items-center gap-1 text-xs">
-		<button type="button" class="underline" onclick={() => navigateToPath('')}>루트</button>
+		<button type="button" class="underline" onclick={() => navigateToPath('')}>{$t('filesTab.root')}</button>
 		{#each filesBreadcrumb() as segment, i}
 			<span>/</span>
 			<button type="button" class="underline" onclick={() => navigateToBreadcrumb(i)}>{segment}</button>
@@ -112,10 +113,10 @@
 		class="mt-2 rounded-md border {isDraggingOverFiles ? 'border-primary bg-primary/5' : 'border-border'}"
 	>
 		{#if loadingFiles}
-			<p class="text-muted-foreground p-3 text-xs">불러오는 중...</p>
+			<p class="text-muted-foreground p-3 text-xs">{$t('filesTab.loading')}</p>
 		{:else if fileEntries.length === 0}
 			<p class="text-muted-foreground p-3 text-xs">
-				빈 폴더입니다. 파일을 여기로 드래그해서 업로드할 수 있습니다.
+				{$t('filesTab.emptyFolder')}
 			</p>
 		{:else}
 			<div class="divide-border divide-y">
@@ -142,11 +143,11 @@
 							/>
 							<button
 								class="bg-primary text-primary-foreground shrink-0 rounded-md px-2 py-1 text-xs"
-								onclick={onConfirmRename}>저장</button
+								onclick={onConfirmRename}>{$t('filesTab.save')}</button
 							>
 							<button
 								class="border-border shrink-0 rounded-md border px-2 py-1 text-xs"
-								onclick={onCancelRename}>취소</button
+								onclick={onCancelRename}>{$t('filesTab.cancel')}</button
 							>
 						</div>
 					{:else}
@@ -169,15 +170,15 @@
 								<button
 									class="border-border rounded-md border px-2 py-1 text-xs"
 									onclick={() => onDownloadEntry(entry)}
-									>{entry.is_dir ? '다운로드 (zip)' : '다운로드'}</button
+									>{entry.is_dir ? $t('filesTab.downloadZip') : $t('filesTab.download')}</button
 								>
 								<button
 									class="border-border rounded-md border px-2 py-1 text-xs"
-									onclick={() => onStartRename(entry)}>이름변경</button
+									onclick={() => onStartRename(entry)}>{$t('filesTab.rename')}</button
 								>
 								<button
 									class="border-border text-destructive rounded-md border px-2 py-1 text-xs"
-									onclick={() => onDeleteEntry(entry)}>삭제</button
+									onclick={() => onDeleteEntry(entry)}>{$t('filesTab.delete')}</button
 								>
 							</div>
 						</div>
@@ -210,7 +211,7 @@
 				>
 			</div>
 			{#if loadingFileContent}
-				<p class="text-muted-foreground text-xs">불러오는 중...</p>
+				<p class="text-muted-foreground text-xs">{$t('filesTab.loading')}</p>
 			{:else}
 				<textarea
 					bind:value={editingContent}
@@ -228,10 +229,10 @@
 						disabled={savingFileContent}
 						onclick={onSaveFileContent}
 					>
-						{savingFileContent ? '저장 중...' : '저장'}
+						{savingFileContent ? $t('filesTab.saving') : $t('filesTab.save')}
 					</button>
 					{#if fileContentSaved}
-						<span class="text-muted-foreground text-xs">저장됨 · 재시작해야 반영됩니다</span>
+						<span class="text-muted-foreground text-xs">{$t('filesTab.savedRestartRequired')}</span>
 					{/if}
 				</div>
 			{/if}
@@ -254,7 +255,9 @@
 		}}
 	>
 		<div class="bg-card border-border w-full max-w-sm rounded-lg border p-4 shadow-lg">
-			<h2 class="font-medium">{fileOpenErrorName || '파일'}을(를) 열 수 없습니다</h2>
+			<h2 class="font-medium">
+				{$t('filesTab.openErrorTitle', { name: fileOpenErrorName || $t('filesTab.file') })}
+			</h2>
 			<p class="text-muted-foreground mt-2 text-sm">{fileOpenError}</p>
 			<div class="mt-3 flex gap-2">
 				<button
@@ -262,14 +265,14 @@
 					class="border-border flex-1 rounded-md border px-4 py-2 text-sm font-medium"
 					onclick={onCloseFileOpenError}
 				>
-					닫기
+					{$t('filesTab.close')}
 				</button>
 				<button
 					type="button"
 					class="bg-primary text-primary-foreground flex-1 rounded-md px-4 py-2 text-sm font-medium"
 					onclick={onDownloadFileOpenError}
 				>
-					다운로드
+					{$t('filesTab.download')}
 				</button>
 			</div>
 		</div>

@@ -1,0 +1,40 @@
+export const messages = {
+	ko: {
+		'filesTab.title': '파일',
+		'filesTab.uploading': '업로드 중...',
+		'filesTab.upload': '업로드',
+		'filesTab.root': '루트',
+		'filesTab.loading': '불러오는 중...',
+		'filesTab.emptyFolder': '빈 폴더입니다. 파일을 여기로 드래그해서 업로드할 수 있습니다.',
+		'filesTab.save': '저장',
+		'filesTab.cancel': '취소',
+		'filesTab.downloadZip': '다운로드 (zip)',
+		'filesTab.download': '다운로드',
+		'filesTab.rename': '이름변경',
+		'filesTab.delete': '삭제',
+		'filesTab.saving': '저장 중...',
+		'filesTab.savedRestartRequired': '저장됨 · 재시작해야 반영됩니다',
+		'filesTab.file': '파일',
+		'filesTab.openErrorTitle': '{name}을(를) 열 수 없습니다',
+		'filesTab.close': '닫기'
+	},
+	en: {
+		'filesTab.title': 'Files',
+		'filesTab.uploading': 'Uploading...',
+		'filesTab.upload': 'Upload',
+		'filesTab.root': 'Root',
+		'filesTab.loading': 'Loading...',
+		'filesTab.emptyFolder': 'This folder is empty. Drag files here to upload them.',
+		'filesTab.save': 'Save',
+		'filesTab.cancel': 'Cancel',
+		'filesTab.downloadZip': 'Download (zip)',
+		'filesTab.download': 'Download',
+		'filesTab.rename': 'Rename',
+		'filesTab.delete': 'Delete',
+		'filesTab.saving': 'Saving...',
+		'filesTab.savedRestartRequired': 'Saved · restart required to take effect',
+		'filesTab.file': 'File',
+		'filesTab.openErrorTitle': 'Could not open {name}',
+		'filesTab.close': 'Close'
+	}
+};

@@ -2,6 +2,7 @@
 	import { api } from '$lib/api';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { t } from '$lib/i18n';
 
 	let mode = $state<'loading' | 'setup' | 'login'>('loading');
 	let username = $state('');
@@ -78,19 +79,18 @@
 		<h1 class="text-xl font-semibold">CraftDeck</h1>
 
 		{#if mode === 'loading'}
-			<p class="text-muted-foreground mt-4 text-sm">불러오는 중...</p>
+			<p class="text-muted-foreground mt-4 text-sm">{$t('loginPage.loading')}</p>
 		{:else if needsTotp}
 			<!-- FR-37: a separate screen once the password's already been
 				verified -- makes it unambiguous that this is a distinct step
 				(not the same form growing a field, which could look like a
 				glitch). -->
 			<p class="text-muted-foreground mt-1 text-sm">
-				비밀번호가 확인됐습니다. 이 계정은 2단계 인증이 켜져 있어, 인증 앱의 코드를 마저
-				입력해야 합니다.
+				{$t('loginPage.totpDescription')}
 			</p>
 			<form class="mt-4 space-y-4" onsubmit={submit}>
 				<div>
-					<label class="mb-1 block text-sm font-medium" for="totp-code">2단계 인증 코드</label>
+					<label class="mb-1 block text-sm font-medium" for="totp-code">{$t('loginPage.totpCodeLabel')}</label>
 					<!-- svelte-ignore a11y_autofocus -->
 					<input
 						id="totp-code"
@@ -99,7 +99,7 @@
 						autocomplete="one-time-code"
 						autofocus
 						required
-						placeholder="인증 앱의 6자리 코드 (또는 백업 코드)"
+						placeholder={$t('loginPage.totpPlaceholder')}
 						bind:value={totpCode}
 						class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
 					/>
@@ -112,28 +112,28 @@
 					disabled={submitting}
 					class="bg-primary text-primary-foreground w-full rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
 				>
-					{submitting ? '확인 중...' : '확인'}
+					{submitting ? $t('loginPage.confirming') : $t('loginPage.confirm')}
 				</button>
 				<button
 					type="button"
 					class="text-muted-foreground w-full text-center text-xs hover:underline"
 					onclick={backToCredentials}
 				>
-					다른 계정으로 로그인
+					{$t('loginPage.switchAccount')}
 				</button>
 			</form>
 		{:else}
 			{#if mode === 'setup'}
 				<p class="text-muted-foreground mt-1 text-sm">
-					처음 실행이네요. 관리자 계정을 만들어주세요.
+					{$t('loginPage.setupDescription')}
 				</p>
 			{:else}
-				<p class="text-muted-foreground mt-1 text-sm">로그인해주세요.</p>
+				<p class="text-muted-foreground mt-1 text-sm">{$t('loginPage.loginDescription')}</p>
 			{/if}
 
 			<form class="mt-4 space-y-4" method="post" onsubmit={submit}>
 				<div>
-					<label class="mb-1 block text-sm font-medium" for="username">아이디</label>
+					<label class="mb-1 block text-sm font-medium" for="username">{$t('loginPage.usernameLabel')}</label>
 					<input
 						id="username"
 						name="username"
@@ -144,7 +144,7 @@
 					/>
 				</div>
 				<div>
-					<label class="mb-1 block text-sm font-medium" for="password">비밀번호</label>
+					<label class="mb-1 block text-sm font-medium" for="password">{$t('loginPage.passwordLabel')}</label>
 					<input
 						id="password"
 						name="password"
@@ -156,7 +156,7 @@
 						class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
 					/>
 					{#if mode === 'setup'}
-						<p class="text-muted-foreground mt-1 text-xs">8자 이상</p>
+						<p class="text-muted-foreground mt-1 text-xs">{$t('loginPage.passwordHint')}</p>
 					{/if}
 				</div>
 				{#if error}
@@ -168,11 +168,11 @@
 					class="bg-primary text-primary-foreground w-full rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
 				>
 					{#if submitting}
-						처리 중...
+						{$t('loginPage.processing')}
 					{:else if mode === 'setup'}
-						계정 만들기
+						{$t('loginPage.createAccount')}
 					{:else}
-						로그인
+						{$t('loginPage.login')}
 					{/if}
 				</button>
 			</form>

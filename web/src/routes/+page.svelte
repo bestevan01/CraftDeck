@@ -16,7 +16,7 @@
 		OVERCLOCK_PRESETS
 	} from '$lib/api';
 	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
-	import AccountModal from '$lib/AccountModal.svelte';
+	import AccountSettings from '$lib/AccountSettings.svelte';
 	import VelocityProxyCard from '$lib/VelocityProxyCard.svelte';
 	import ExternalAccessCard from '$lib/ExternalAccessCard.svelte';
 	import SwapCard from '$lib/SwapCard.svelte';
@@ -33,6 +33,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
+	import { t } from '$lib/i18n';
 
 	// Shared by every destructive action on this page (see ConfirmDialog.svelte
 	// for why this replaced the browser's native confirm()).
@@ -56,14 +57,19 @@
 	// 세션이 있을 때만 두 버튼을 노출한다.
 	let isLoggedIn = $state(false);
 
-	// 비밀번호 변경 + 2단계 인증 모달 (AccountModal.svelte) -- 이 페이지는
-	// 언제 열지(showAccountModal)와 두 컴포넌트 헤더가 공유하는 신원 정보
-	// (username, totpEnabled)만 들고, 나머지 폼 상태는 컴포넌트 내부 소관.
+	// 비밀번호 변경 + 2단계 인증 (AccountSettings.svelte, 설정 탭의 "계정"
+	// 서브탭에 인라인으로 렌더링됨) -- 이 페이지는 두 컴포넌트가 공유하는
+	// 신원 정보(username, totpEnabled)만 들고, 나머지 폼 상태는 컴포넌트
+	// 내부 소관.
 	let username = $state('');
-	let showAccountModal = $state(false);
 	let totpEnabled = $state(false);
-	function openAccountModal() {
-		showAccountModal = true;
+	// 2FA 미설정 등으로 계정 설정으로 안내해야 할 때 쓰는 공통 진입점 --
+	// 세션 유무와 무관하게 항상 접근 가능해야 해서(예전엔 헤더의 "계정
+	// 설정" 버튼이 로그인 세션이 있을 때만 보여서 LAN 접속 중엔 아예 막혀
+	// 있었다) 설정 탭 자체로 이동시킨다.
+	function openAccountSettings() {
+		setActiveTab('settings');
+		setSettingsSubTab('account');
 	}
 
 	let instances = $state<Instance[]>([]);
@@ -176,8 +182,8 @@
 	function onWANToggleChange(enabled: boolean) {
 		if (enabled) {
 			if (!totpEnabled) {
-				networkError = '외부 접속을 켜려면 먼저 2단계 인증을 설정해야 합니다.';
-				openAccountModal();
+				networkError = $t('mainPage.network.wanRequiresTotp');
+				openAccountSettings();
 				return;
 			}
 			showWANWarningModal = true;
@@ -248,7 +254,7 @@
 	async function saveSwap() {
 		const sizeGB = Number(swapSizeInput);
 		if (!Number.isFinite(sizeGB) || sizeGB <= 0) {
-			swapError = '0보다 큰 크기를 GB 단위로 입력하세요.';
+			swapError = $t('mainPage.swap.invalidSize');
 			return;
 		}
 		const sizeMB = Math.round(sizeGB * 1024);
@@ -264,7 +270,7 @@
 	}
 
 	function disableSwap() {
-		askConfirm('스왑파일을 완전히 끄고 삭제할까요?', doDisableSwap);
+		askConfirm($t('mainPage.swap.confirmDisable'), doDisableSwap);
 	}
 
 	async function doDisableSwap() {
@@ -354,7 +360,7 @@
 			if (stillRunning.length === 0) return;
 			await new Promise((resolve) => setTimeout(resolve, 2000));
 		}
-		throw new Error('서버 종료 대기 시간이 초과됐습니다. 인스턴스 상태를 확인한 뒤 다시 시도해주세요.');
+		throw new Error($t('mainPage.overclock.waitTimeout'));
 	}
 
 	// Velocity 프록시(kind: 'proxy')는 사용자가 직접 올린 마인크래프트
@@ -395,7 +401,7 @@
 		}
 		const names = running.map((i) => i.name).join(', ');
 		askConfirm(
-			`다음 서버가 실행 중입니다: ${names}\n재부팅 전에 먼저 각 서버를 안전하게 종료합니다. 계속할까요?`,
+			$t('mainPage.overclock.confirmRebootStop', { names }),
 			async () => {
 				overclockSaving = true;
 				overclockError = '';
@@ -447,7 +453,7 @@
 			if (Date.now() > deadline) {
 				clearInterval(overclockRebootPollHandle);
 				overclockRebooting = false;
-				overclockError = '재부팅 후 응답이 없습니다. 잠시 후 페이지를 직접 새로고침해보세요.';
+				overclockError = $t('mainPage.overclock.rebootNoResponse');
 				return;
 			}
 			try {
@@ -477,7 +483,7 @@
 		}
 		const names = running.map((i) => i.name).join(', ');
 		askConfirm(
-			`다음 서버가 실행 중입니다: ${names}\n안정성 테스트 동안 먼저 종료하고, 끝나면 자동으로 다시 시작합니다. 계속할까요?`,
+			$t('mainPage.benchmark.confirmStop', { names }),
 			async () => {
 				benchmarkStarting = true;
 				overclockError = '';
@@ -846,7 +852,7 @@
 			if (v.update_available) {
 				showUpdateModal = true;
 			} else {
-				checkNowMessage = '최신 버전입니다.';
+				checkNowMessage = $t('mainPage.update.upToDate');
 			}
 		} catch (err) {
 			checkNowMessage = err instanceof Error ? err.message : String(err);
@@ -903,39 +909,42 @@
 	const tourSteps: TourStep[] = [
 		{
 			selector: '#tour-create-server',
-			title: '서버 만들기',
-			body: '여기서 새 마인크래프트 서버를 몇 번의 클릭으로 만들 수 있어요.',
+			title: $t('mainPage.tour.createServer.title'),
+			body: $t('mainPage.tour.createServer.body'),
 			beforeShow: () => (activeTab = 'instances')
 		},
 		{
 			selector: '#tour-console-sample, a[href^="/instances/"]',
-			title: '실시간 콘솔',
-			body: '서버 로그를 실시간으로 보고 명령어를 바로 입력할 수 있어요.',
+			title: $t('mainPage.tour.console.title'),
+			body: $t('mainPage.tour.console.body'),
 			beforeShow: () => (activeTab = 'instances')
 		},
 		{
 			selector: '#tour-settings-tab',
-			title: '전역 설정',
-			body: '외부 접속, 도메인 연결, 스왑처럼 서버 하나에 속하지 않는 설정은 여기 모여 있어요.',
+			title: $t('mainPage.tour.settings.title'),
+			body: $t('mainPage.tour.settings.body'),
 			beforeShow: () => (activeTab = 'instances')
 		},
 		{
 			selector: '#tour-external-access',
-			title: '외부 접속',
-			body: '친구를 초대해서 같이 플레이하려면 여기서 외부 접속을 켜세요.',
+			title: $t('mainPage.tour.externalAccess.title'),
+			body: $t('mainPage.tour.externalAccess.body'),
 			beforeShow: () => (activeTab = 'settings')
 		},
 		{
 			selector: '#tour-domain-card',
-			title: '도메인 연결',
-			body: '소유한 도메인이 있다면 연결해서 서브도메인으로 여러 서버를 묶을 수 있어요. Cloudflare를 쓴다면 가이드 버튼으로 바로 따라 할 수 있어요.',
+			title: $t('mainPage.tour.domain.title'),
+			body: $t('mainPage.tour.domain.body'),
 			beforeShow: () => (activeTab = 'settings')
 		},
 		{
-			selector: '#tour-account-button',
-			title: '계정 설정',
-			body: '2단계 인증이나 비밀번호는 여기서 관리해요. 이 투어는 여기 안의 "다시 보기" 버튼으로 언제든 다시 볼 수 있어요.',
-			placement: 'left'
+			selector: '#tour-account-tab',
+			title: $t('mainPage.tour.account.title'),
+			body: $t('mainPage.tour.account.body'),
+			beforeShow: () => {
+				activeTab = 'settings';
+				settingsSubTab = 'account';
+			}
 		}
 	];
 
@@ -986,11 +995,11 @@
 		createError = '';
 		if (form.loader === 'custom') {
 			if (!customLoaderName.trim()) {
-				createError = '구동기 이름을 입력해주세요.';
+				createError = $t('mainPage.create.loaderNameRequired');
 				return;
 			}
 			if (!customJarFile) {
-				createError = '구동기 jar 파일을 선택해주세요.';
+				createError = $t('mainPage.create.jarRequired');
 				return;
 			}
 		}
@@ -1017,9 +1026,9 @@
 					// surface it directly rather than via createError (the
 					// modal is closing regardless).
 					alert(
-						'서버는 생성됐지만 구동기 jar 업로드에 실패했습니다: ' +
-							(err instanceof Error ? err.message : String(err)) +
-							'\n인스턴스 상세 페이지의 파일 탭에서 server.jar를 직접 업로드할 수 있습니다.'
+						$t('mainPage.create.jarUploadFailed', {
+							error: err instanceof Error ? err.message : String(err)
+						})
 					);
 				}
 			}
@@ -1033,9 +1042,9 @@
 					// checked). The create modal is about to close either way,
 					// so alert() here since createError would never be seen.
 					alert(
-						'서버는 생성됐지만 월드 데이터 적용에 실패했습니다: ' +
-							(err instanceof Error ? err.message : String(err)) +
-							'\n인스턴스 상세 페이지에서 다시 시도할 수 있습니다.'
+						$t('mainPage.create.worldImportFailed', {
+							error: err instanceof Error ? err.message : String(err)
+						})
 					);
 				}
 			}
@@ -1172,7 +1181,7 @@
 	}
 
 	function remove(id: string) {
-		askConfirm('이 인스턴스를 삭제할까요? 월드 데이터도 함께 지워집니다.', () => doRemove(id));
+		askConfirm($t('mainPage.instances.confirmDelete'), () => doRemove(id));
 	}
 
 	async function doRemove(id: string) {
@@ -1205,11 +1214,11 @@
 	function statusLabel(status: Instance['status']) {
 		return (
 			{
-				stopped: '중지됨',
-				starting: '시작 중',
-				running: '실행 중',
-				stopping: '종료 중',
-				crashed: '비정상 종료'
+				stopped: $t('mainPage.status.stopped'),
+				starting: $t('mainPage.status.starting'),
+				running: $t('mainPage.status.running'),
+				stopping: $t('mainPage.status.stopping'),
+				crashed: $t('mainPage.status.crashed')
 			}[status] ?? status
 		);
 	}
@@ -1244,14 +1253,18 @@
 		replaceState(url, {});
 	}
 
-	// 전역 설정 탭 안의 2차 분류: 외부 접속/Velocity/도메인 연결처럼 "밖에서
+	// 설정 탭 안의 2차 분류: 외부 접속/Velocity/도메인 연결처럼 "밖에서
 	// 어떻게 들어오는지"에 관한 항목은 network로, 스왑/오버클럭처럼 이
-	// 라즈베리파이 자체의 자원을 다루는 항목은 hardware로 묶는다. 같은
-	// ?subtab= 쿼리 패턴으로 새로고침해도 유지된다.
-	let settingsSubTab = $state<'network' | 'hardware'>(
-		$page.url.searchParams.get('subtab') === 'hardware' ? 'hardware' : 'network'
+	// 라즈베리파이 자체의 자원을 다루는 항목은 hardware로, 비밀번호/2단계
+	// 인증/언어처럼 세션과 무관하게 항상 접근 가능해야 하는 항목은
+	// account로 묶는다. 같은 ?subtab= 쿼리 패턴으로 새로고침해도 유지된다.
+	function validSettingsSubTab(v: string | null): 'network' | 'hardware' | 'account' {
+		return v === 'hardware' || v === 'account' ? v : 'network';
+	}
+	let settingsSubTab = $state<'network' | 'hardware' | 'account'>(
+		validSettingsSubTab($page.url.searchParams.get('subtab'))
 	);
-	function setSettingsSubTab(tab: 'network' | 'hardware') {
+	function setSettingsSubTab(tab: 'network' | 'hardware' | 'account') {
 		settingsSubTab = tab;
 		const url = new URL(window.location.href);
 		if (tab === 'network') {
@@ -1272,28 +1285,21 @@
 				class="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm font-medium"
 				onclick={openCreateForm}
 			>
-				+ 서버 만들기
+				{$t('mainPage.header.createServer')}
 			</button>
 			{#if isLoggedIn}
-				<button
-					id="tour-account-button"
-					class="border-border rounded-md border px-4 py-2 text-sm font-medium"
-					onclick={openAccountModal}
-				>
-					계정 설정
-				</button>
 				<button
 					class="border-border rounded-md border px-4 py-2 text-sm font-medium"
 					onclick={logout}
 				>
-					로그아웃
+					{$t('mainPage.header.logout')}
 				</button>
 			{/if}
 		</div>
 	</div>
 
 	{#if loadError}
-		<p class="text-destructive mt-4 text-sm">서버 목록을 불러오지 못했습니다: {loadError}</p>
+		<p class="text-destructive mt-4 text-sm">{$t('mainPage.loadError', { error: loadError })}</p>
 	{/if}
 
 	<div class="border-border mt-6 flex gap-1 border-b">
@@ -1301,14 +1307,14 @@
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'instances'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => setActiveTab('instances')}>인스턴스</button
+			onclick={() => setActiveTab('instances')}>{$t('mainPage.tabs.instances')}</button
 		>
 		<button
 			id="tour-settings-tab"
 			class="border-b-2 px-3 py-2 text-sm {activeTab === 'settings'
 				? 'border-primary font-medium'
 				: 'text-muted-foreground border-transparent'}"
-			onclick={() => setActiveTab('settings')}>전역 설정</button
+			onclick={() => setActiveTab('settings')}>{$t('mainPage.tabs.settings')}</button
 		>
 	</div>
 
@@ -1332,32 +1338,32 @@
 						<div>
 							<div class="flex items-center gap-2">
 								<span class="h-2 w-2 rounded-full bg-muted-foreground/40"></span>
-								<span class="font-medium">예시 서버</span>
-								<span class="text-muted-foreground text-xs">실행 중</span>
+								<span class="font-medium">{$t('mainPage.instances.exampleServerName')}</span>
+								<span class="text-muted-foreground text-xs">{$t('mainPage.instances.exampleStatus')}</span>
 								<span class="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-[10px]"
-									>예시</span
+									>{$t('mainPage.instances.exampleBadge')}</span
 								>
 							</div>
 							<p class="text-muted-foreground mt-1 text-xs">Paper · 1.21.4 · Java 21</p>
 						</div>
 						<div class="flex gap-2">
 							<button disabled class="border-border rounded-md border px-3 py-1.5 text-sm opacity-50">
-								종료
+								{$t('mainPage.instances.stop')}
 							</button>
 							<span
 								id="tour-console-sample"
-								class="border-border rounded-md border px-3 py-1.5 text-sm">콘솔</span
+								class="border-border rounded-md border px-3 py-1.5 text-sm">{$t('mainPage.instances.console')}</span
 							>
 							<button
 								disabled
 								class="border-border text-destructive rounded-md border px-3 py-1.5 text-sm opacity-50"
 							>
-								삭제
+								{$t('mainPage.instances.delete')}
 							</button>
 						</div>
 					</div>
 				{:else}
-					<p class="text-muted-foreground text-sm">서버 인스턴스가 아직 없습니다.</p>
+					<p class="text-muted-foreground text-sm">{$t('mainPage.instances.empty')}</p>
 				{/if}
 			{/if}
 			{#each visibleInstances as inst (inst.id)}
@@ -1379,7 +1385,7 @@
 								onclick={() => stop(inst.id)}
 								class="border-border rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
 							>
-								종료
+								{$t('mainPage.instances.stop')}
 							</button>
 						{:else}
 							<button
@@ -1387,19 +1393,19 @@
 								onclick={() => start(inst.id)}
 								class="border-border rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
 							>
-								시작
+								{$t('mainPage.instances.start')}
 							</button>
 						{/if}
 						<a
 							href="/instances/{inst.id}"
-							class="border-border rounded-md border px-3 py-1.5 text-sm">콘솔</a
+							class="border-border rounded-md border px-3 py-1.5 text-sm">{$t('mainPage.instances.console')}</a
 						>
 						<button
 							disabled={busyId === inst.id}
 							onclick={() => remove(inst.id)}
 							class="border-border text-destructive rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
 						>
-							삭제
+							{$t('mainPage.instances.delete')}
 						</button>
 					</div>
 				</div>
@@ -1412,13 +1418,20 @@
 					class="rounded-md px-3 py-2 text-left text-sm {settingsSubTab === 'network'
 						? 'bg-muted font-medium'
 						: 'text-muted-foreground'}"
-					onclick={() => setSettingsSubTab('network')}>네트워크</button
+					onclick={() => setSettingsSubTab('network')}>{$t('mainPage.settings.network')}</button
 				>
 				<button
 					class="rounded-md px-3 py-2 text-left text-sm {settingsSubTab === 'hardware'
 						? 'bg-muted font-medium'
 						: 'text-muted-foreground'}"
-					onclick={() => setSettingsSubTab('hardware')}>하드웨어</button
+					onclick={() => setSettingsSubTab('hardware')}>{$t('mainPage.settings.hardware')}</button
+				>
+				<button
+					id="tour-account-tab"
+					class="rounded-md px-3 py-2 text-left text-sm {settingsSubTab === 'account'
+						? 'bg-muted font-medium'
+						: 'text-muted-foreground'}"
+					onclick={() => setSettingsSubTab('account')}>{$t('mainPage.settings.account')}</button
 				>
 			</div>
 
@@ -1457,7 +1470,7 @@
 				onOpenCloudflareGuide={() => (showCloudflareGuide = true)}
 			/>
 			</div>
-			{:else}
+			{:else if settingsSubTab === 'hardware'}
 			<div class="space-y-4">
 			{#if swapInfo === null || swapInfo.supported}
 				<SwapCard
@@ -1487,6 +1500,8 @@
 				onRevertOverclock={revertOverclock}
 			/>
 			</div>
+			{:else}
+			<AccountSettings bind:username bind:totpEnabled onStartTour={startTour} />
 			{/if}
 			</div>
 			</div>
@@ -1538,8 +1553,6 @@
 	onSubmit={createInstance}
 />
 
-<AccountModal bind:open={showAccountModal} bind:username bind:totpEnabled onStartTour={startTour} />
-
 <CloudflareTutorialModal
 	bind:open={showCloudflareGuide}
 	bind:domainForm
@@ -1552,7 +1565,7 @@
 
 <WANWarningModal
 	bind:open={showWANWarningModal}
-	onGoToAccountModal={openAccountModal}
+	onGoToAccountModal={openAccountSettings}
 	onConfirm={confirmWANEnable}
 />
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SwapInfo, SystemResources } from '$lib/api';
+	import { t } from '$lib/i18n';
 
 	let {
 		resources,
@@ -32,7 +33,7 @@
 </script>
 
 <div class="border-border bg-card rounded-lg border p-4">
-	<h2 class="font-medium">라즈베리파이 리소스</h2>
+	<h2 class="font-medium">{$t('resourcePanel.title')}</h2>
 	{#if resources}
 		{@const swapTotalMB = swapInfo?.enabled ? swapInfo.size_mb : 0}
 		{@const swapUsedMB = swapInfo?.enabled ? swapInfo.used_mb : 0}
@@ -44,9 +45,10 @@
 		<div class="mt-3 space-y-4">
 			<div>
 				<div class="mb-1 flex justify-between text-xs">
-					<span class="text-muted-foreground">CPU 사용률</span>
+					<span class="text-muted-foreground">{$t('resourcePanel.cpuUsage')}</span>
 					<span
-						>{resources.cpu_percent.toFixed(0)}% ({resources.cpu_count}코어){#if resources.cpu_temp_c !== undefined}<span
+						>{resources.cpu_percent.toFixed(0)}%
+						({$t('resourcePanel.coreCount', { count: resources.cpu_count })}){#if resources.cpu_temp_c !== undefined}<span
 								class={tempTextClass(resources.cpu_temp_c)}
 								>
 								· {resources.cpu_temp_c.toFixed(1)}°C</span
@@ -63,7 +65,9 @@
 			<div>
 				<div class="mb-1 flex justify-between text-xs">
 					<span class="text-muted-foreground">
-						메모리{#if swapTotalMB > 0}<span class="text-yellow-500"> (+스왑)</span>{/if}
+						{$t('resourcePanel.memory')}{#if swapTotalMB > 0}<span class="text-yellow-500">
+								{$t('resourcePanel.plusSwap')}</span
+							>{/if}
 					</span>
 					<span
 						>{(resources.used_memory_mb / 1024).toFixed(1)}{#if swapUsedMB > 0}<span
@@ -85,7 +89,7 @@
 			</div>
 			<div>
 				<div class="mb-1 flex justify-between text-xs">
-					<span class="text-muted-foreground">디스크</span>
+					<span class="text-muted-foreground">{$t('resourcePanel.disk')}</span>
 					<span
 						>{(resources.used_disk_mb / 1024).toFixed(1)}GB / {(
 							resources.total_disk_mb / 1024
@@ -100,6 +104,6 @@
 	{:else if resourceError}
 		<p class="text-destructive mt-3 text-xs">{resourceError}</p>
 	{:else}
-		<p class="text-muted-foreground mt-3 text-xs">불러오는 중...</p>
+		<p class="text-muted-foreground mt-3 text-xs">{$t('resourcePanel.loading')}</p>
 	{/if}
 </div>
