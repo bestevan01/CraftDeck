@@ -15,6 +15,7 @@
 		type UpdateSettings,
 		OVERCLOCK_PRESETS
 	} from '$lib/api';
+	import logo from '$lib/assets/favicon.svg';
 	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
 	import AccountSettings from '$lib/AccountSettings.svelte';
 	import MiscSettings from '$lib/MiscSettings.svelte';
@@ -1292,7 +1293,10 @@
 
 <main class="bg-background text-foreground flex flex-col p-8 lg:h-screen lg:overflow-hidden">
 	<div class="flex items-center justify-between">
-		<h1 class="text-2xl font-semibold">CraftDeck</h1>
+		<div class="flex items-center gap-2">
+			<img src={logo} alt="" class="h-8 w-8" />
+			<h1 class="text-2xl font-semibold">CraftDeck</h1>
+		</div>
 		<div class="flex gap-2">
 			<button
 				id="tour-create-server"
