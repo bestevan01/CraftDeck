@@ -9,6 +9,7 @@ export const messages = {
 		'mainPage.settings.network': '네트워크',
 		'mainPage.settings.hardware': '하드웨어',
 		'mainPage.settings.account': '계정',
+		'mainPage.settings.misc': '기타',
 
 		'mainPage.instances.exampleServerName': '예시 서버',
 		'mainPage.instances.exampleStatus': '실행 중',
@@ -53,9 +54,9 @@ export const messages = {
 		'mainPage.tour.domain.title': '도메인 연결',
 		'mainPage.tour.domain.body':
 			'소유한 도메인이 있다면 연결해서 서브도메인으로 여러 서버를 묶을 수 있어요. Cloudflare를 쓴다면 가이드 버튼으로 바로 따라 할 수 있어요.',
-		'mainPage.tour.account.title': '계정 설정',
-		'mainPage.tour.account.body':
-			'2단계 인증이나 비밀번호는 여기서 관리해요. 이 투어는 여기 안의 "다시 보기" 버튼으로 언제든 다시 볼 수 있어요.',
+		'mainPage.tour.misc.title': '기타',
+		'mainPage.tour.misc.body':
+			'언어 설정이나 이 투어 다시 보기 같은 부가 기능은 여기 모여 있어요. 필요할 때 언제든 "다시 보기" 버튼으로 다시 볼 수 있어요.',
 
 		'mainPage.create.loaderNameRequired': '구동기 이름을 입력해주세요.',
 		'mainPage.create.jarRequired': '구동기 jar 파일을 선택해주세요.',
@@ -74,6 +75,7 @@ export const messages = {
 		'mainPage.settings.network': 'Network',
 		'mainPage.settings.hardware': 'Hardware',
 		'mainPage.settings.account': 'Account',
+		'mainPage.settings.misc': 'Misc',
 
 		'mainPage.instances.exampleServerName': 'Example Server',
 		'mainPage.instances.exampleStatus': 'Running',
@@ -119,9 +121,9 @@ export const messages = {
 		'mainPage.tour.domain.title': 'Domain Connection',
 		'mainPage.tour.domain.body':
 			'If you own a domain, connect it to group multiple servers under subdomains. If you use Cloudflare, the guide button walks you through it.',
-		'mainPage.tour.account.title': 'Account Settings',
-		'mainPage.tour.account.body':
-			'Manage two-factor authentication and your password here. You can replay this tour anytime with the "Replay" button in here.',
+		'mainPage.tour.misc.title': 'Misc',
+		'mainPage.tour.misc.body':
+			'Extras like the language setting and replaying this tour live here. You can replay this tour anytime with the "Replay" button.',
 
 		'mainPage.create.loaderNameRequired': 'Enter a loader name.',
 		'mainPage.create.jarRequired': 'Select a loader jar file.',

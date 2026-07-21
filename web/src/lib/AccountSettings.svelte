@@ -1,23 +1,23 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import TwoFactorModal from '$lib/TwoFactorModal.svelte';
-	import { locale, setLocale, t, type Locale } from '$lib/i18n';
+	import { t } from '$lib/i18n';
 
 	// 예전엔 헤더의 "계정 설정" 버튼이 여는 모달이었지만, LAN 접속(lan_bypass)
 	// 상태에서는 실제 로그인 세션이 없어 그 버튼 자체가 안 보였다 --
-	// 비밀번호/2단계 인증/언어처럼 세션 유무와 무관하게 접근 가능해야 하는
+	// 비밀번호/2단계 인증처럼 세션 유무와 무관하게 접근 가능해야 하는
 	// 설정들이 막혀 있었던 셈이라, 전역 설정 탭 안의 "계정" 서브탭으로
 	// 옮겨서 언제나 접근 가능하게 한다. 비밀번호 변경은 여기서 바로
 	// 처리하고, 2단계 인증은 QR 스캔 등 별도 흐름이라 별도 모달
-	// (TwoFactorModal)로 뺐다.
+	// (TwoFactorModal)로 뺐다. 언어/투어 다시 보기는 세션과 무관하다는
+	// 점은 같지만 계정 자체와는 무관해서 별도의 "기타" 서브탭
+	// (MiscSettings.svelte)으로 뺐다.
 	let {
 		username = $bindable(''),
-		totpEnabled = $bindable(false),
-		onStartTour
+		totpEnabled = $bindable(false)
 	}: {
 		username: string;
 		totpEnabled: boolean;
-		onStartTour: () => void;
 	} = $props();
 
 	let currentPassword = $state('');
@@ -136,42 +136,6 @@
 			onclick={() => (showTwoFactorModal = true)}
 		>
 			{totpEnabled ? $t('accountModal.twoFactor.manageButton') : $t('accountModal.twoFactor.setupButton')}
-		</button>
-	</div>
-
-	<div class="border-border bg-card flex items-center justify-between rounded-lg border p-4">
-		<h2 class="font-medium">{$t('common.language.label')}</h2>
-		<div class="relative w-40">
-			<select
-				value={$locale}
-				onchange={(e) => setLocale(e.currentTarget.value as Locale)}
-				class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pr-8 pl-3 text-sm"
-			>
-				<option value="ko">{$t('common.language.ko')}</option>
-				<option value="en">{$t('common.language.en')}</option>
-			</select>
-			<svg
-				class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
-				viewBox="0 0 20 20"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.5"
-				><path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round" /></svg
-			>
-		</div>
-	</div>
-
-	<div class="border-border bg-card flex items-center justify-between rounded-lg border p-4">
-		<div>
-			<h2 class="font-medium">{$t('accountModal.tour.title')}</h2>
-			<p class="text-muted-foreground mt-1 text-xs">{$t('accountModal.tour.description')}</p>
-		</div>
-		<button
-			type="button"
-			class="border-border shrink-0 rounded-md border px-3 py-1.5 text-xs"
-			onclick={onStartTour}
-		>
-			{$t('accountModal.tour.replayButton')}
 		</button>
 	</div>
 </div>

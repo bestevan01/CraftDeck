@@ -26,6 +26,7 @@ import { messages as gameSettingsModal } from './dict/GameSettingsModal';
 import { messages as manageTab } from './dict/ManageTab';
 import { messages as memoryConflictModal } from './dict/MemoryConflictModal';
 import { messages as memorySlider } from './dict/MemorySlider';
+import { messages as miscSettings } from './dict/MiscSettings';
 import { messages as overclockCard } from './dict/OverclockCard';
 import { messages as pluginSearchModal } from './dict/PluginSearchModal';
 import { messages as pluginsTab } from './dict/PluginsTab';
@@ -57,6 +58,7 @@ const dictModules = [
 	manageTab,
 	memoryConflictModal,
 	memorySlider,
+	miscSettings,
 	overclockCard,
 	pluginSearchModal,
 	pluginsTab,

@@ -17,6 +17,7 @@
 	} from '$lib/api';
 	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
 	import AccountSettings from '$lib/AccountSettings.svelte';
+	import MiscSettings from '$lib/MiscSettings.svelte';
 	import VelocityProxyCard from '$lib/VelocityProxyCard.svelte';
 	import ExternalAccessCard from '$lib/ExternalAccessCard.svelte';
 	import SwapCard from '$lib/SwapCard.svelte';
@@ -906,7 +907,12 @@
 	let showTour = $state(false);
 	let showCloudflareGuide = $state(false);
 
-	const tourSteps: TourStep[] = [
+	// $derived, not a plain const -- a plain const built from $t(...) once at
+	// component init would freeze the tour's text in whatever locale was
+	// active at page load, never picking up a later language switch (no
+	// full reload happens when switching languages) since nothing here
+	// would re-run it. $derived recomputes whenever $t itself changes.
+	let tourSteps = $derived<TourStep[]>([
 		{
 			selector: '#tour-create-server',
 			title: $t('mainPage.tour.createServer.title'),
@@ -929,24 +935,30 @@
 			selector: '#tour-external-access',
 			title: $t('mainPage.tour.externalAccess.title'),
 			body: $t('mainPage.tour.externalAccess.body'),
-			beforeShow: () => (activeTab = 'settings')
+			beforeShow: () => {
+				activeTab = 'settings';
+				settingsSubTab = 'network';
+			}
 		},
 		{
 			selector: '#tour-domain-card',
 			title: $t('mainPage.tour.domain.title'),
 			body: $t('mainPage.tour.domain.body'),
-			beforeShow: () => (activeTab = 'settings')
-		},
-		{
-			selector: '#tour-account-tab',
-			title: $t('mainPage.tour.account.title'),
-			body: $t('mainPage.tour.account.body'),
 			beforeShow: () => {
 				activeTab = 'settings';
-				settingsSubTab = 'account';
+				settingsSubTab = 'network';
+			}
+		},
+		{
+			selector: '#tour-misc-tab',
+			title: $t('mainPage.tour.misc.title'),
+			body: $t('mainPage.tour.misc.body'),
+			beforeShow: () => {
+				activeTab = 'settings';
+				settingsSubTab = 'misc';
 			}
 		}
-	];
+	]);
 
 	function startTour() {
 		showTour = true;
@@ -1256,15 +1268,17 @@
 	// 설정 탭 안의 2차 분류: 외부 접속/Velocity/도메인 연결처럼 "밖에서
 	// 어떻게 들어오는지"에 관한 항목은 network로, 스왑/오버클럭처럼 이
 	// 라즈베리파이 자체의 자원을 다루는 항목은 hardware로, 비밀번호/2단계
-	// 인증/언어처럼 세션과 무관하게 항상 접근 가능해야 하는 항목은
-	// account로 묶는다. 같은 ?subtab= 쿼리 패턴으로 새로고침해도 유지된다.
-	function validSettingsSubTab(v: string | null): 'network' | 'hardware' | 'account' {
-		return v === 'hardware' || v === 'account' ? v : 'network';
+	// 인증처럼 세션과 무관하게 항상 접근 가능해야 하는 계정 고유 항목은
+	// account로, 언어/투어 다시 보기처럼 세션과 무관하지만 계정과는
+	// 무관한 부가 항목은 misc로 묶는다. 같은 ?subtab= 쿼리 패턴으로
+	// 새로고침해도 유지된다.
+	function validSettingsSubTab(v: string | null): 'network' | 'hardware' | 'account' | 'misc' {
+		return v === 'hardware' || v === 'account' || v === 'misc' ? v : 'network';
 	}
-	let settingsSubTab = $state<'network' | 'hardware' | 'account'>(
+	let settingsSubTab = $state<'network' | 'hardware' | 'account' | 'misc'>(
 		validSettingsSubTab($page.url.searchParams.get('subtab'))
 	);
-	function setSettingsSubTab(tab: 'network' | 'hardware' | 'account') {
+	function setSettingsSubTab(tab: 'network' | 'hardware' | 'account' | 'misc') {
 		settingsSubTab = tab;
 		const url = new URL(window.location.href);
 		if (tab === 'network') {
@@ -1427,11 +1441,17 @@
 					onclick={() => setSettingsSubTab('hardware')}>{$t('mainPage.settings.hardware')}</button
 				>
 				<button
-					id="tour-account-tab"
 					class="rounded-md px-3 py-2 text-left text-sm {settingsSubTab === 'account'
 						? 'bg-muted font-medium'
 						: 'text-muted-foreground'}"
 					onclick={() => setSettingsSubTab('account')}>{$t('mainPage.settings.account')}</button
+				>
+				<button
+					id="tour-misc-tab"
+					class="rounded-md px-3 py-2 text-left text-sm {settingsSubTab === 'misc'
+						? 'bg-muted font-medium'
+						: 'text-muted-foreground'}"
+					onclick={() => setSettingsSubTab('misc')}>{$t('mainPage.settings.misc')}</button
 				>
 			</div>
 
@@ -1500,8 +1520,10 @@
 				onRevertOverclock={revertOverclock}
 			/>
 			</div>
+			{:else if settingsSubTab === 'account'}
+			<AccountSettings bind:username bind:totpEnabled />
 			{:else}
-			<AccountSettings bind:username bind:totpEnabled onStartTour={startTour} />
+			<MiscSettings onStartTour={startTour} />
 			{/if}
 			</div>
 			</div>

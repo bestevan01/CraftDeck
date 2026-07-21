@@ -15,10 +15,7 @@ export const messages = {
 		'accountModal.twoFactor.enabled': '설정되어 있습니다.',
 		'accountModal.twoFactor.disabled': '아직 설정하지 않았습니다.',
 		'accountModal.twoFactor.manageButton': '관리',
-		'accountModal.twoFactor.setupButton': '설정',
-		'accountModal.tour.title': '튜토리얼',
-		'accountModal.tour.description': '처음 접속했을 때 봤던 화면 안내를 다시 봅니다.',
-		'accountModal.tour.replayButton': '다시 보기'
+		'accountModal.twoFactor.setupButton': '설정'
 	},
 	en: {
 		'accountModal.title': 'Account settings',
@@ -36,9 +33,6 @@ export const messages = {
 		'accountModal.twoFactor.enabled': 'Enabled.',
 		'accountModal.twoFactor.disabled': 'Not set up yet.',
 		'accountModal.twoFactor.manageButton': 'Manage',
-		'accountModal.twoFactor.setupButton': 'Set up',
-		'accountModal.tour.title': 'Tutorial',
-		'accountModal.tour.description': 'Watch the walkthrough you saw on your first visit again.',
-		'accountModal.tour.replayButton': 'Watch again'
+		'accountModal.twoFactor.setupButton': 'Set up'
 	}
 };
