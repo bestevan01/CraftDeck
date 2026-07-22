@@ -1527,7 +1527,7 @@
 			{:else if settingsSubTab === 'account'}
 			<AccountSettings bind:username bind:totpEnabled />
 			{:else}
-			<MiscSettings onStartTour={startTour} />
+			<MiscSettings onStartTour={startTour} currentVersion={craftdeckCurrentVersion} />
 			{/if}
 			</div>
 			</div>
@@ -1551,6 +1551,7 @@
 					checkingNow={checkingUpdateNow}
 					checkNowMessage={checkNowMessage}
 					onCheckNow={checkForUpdateNow}
+					currentVersion={craftdeckCurrentVersion}
 				/>
 			{/if}
 		</div>

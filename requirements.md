@@ -178,13 +178,13 @@
 | 영역 | 선택 | 비고 |
 |---|---|---|
 | 백엔드 | Go | 단일 정적 바이너리, arm64/armhf 크로스컴파일 용이 |
-| 프론트엔드 | SvelteKit (정적 빌드) | Go 바이너리에 `embed.FS`로 내장 |
+| 프론트엔드 | SvelteKit (정적 빌드) | Go 바이너리에 `embed.FS`로 내장. React보다 유리한 이유는 6.1 참고 |
 | UI 컴포넌트/스타일링 | Tailwind CSS + shadcn-svelte (Bits UI 헤드리스 프리미티브 기반) | 다크모드 우선 대시보드 디자인을 직접 커스터마이즈. 컴포넌트 소스를 프로젝트에 복사해 사용하는 방식이라 정적 빌드 용량 절감에도 유리. AntD/MUI류 완성형 데이터 테이블은 없어 목록/로그 테이블 로직은 직접 구현 필요 |
 | 실시간 통신 | WebSocket: `nhooyr.io/websocket` (구현 및 실기 검증 완료) | 콘솔 로그 스트리밍(`journalctl -f` 중계) / 명령 입력 / GUI 버튼 명령 결과 반영 |
 | 게임 서버 제어 | RCON 클라이언트 (자체 구현, Source RCON 프로토콜, 실기 검증 완료) | 인스턴스당 상시 연결 유지 + 자동 재연결. 텍스트 명령 및 GUI 버튼 명령 모두 동일 경로(`Manager.Execute`)로 전송 |
 | 구동기 설치 | Mojang `version_manifest.json`(Vanilla), PaperMC `fill` API(Paper/Folia), PurpurMC API, LeafMC API, Jenkins(Pufferfish), Fabric Meta API, NeoForged Maven+인스톨러, Velocity 공식 배포처 + 직접 업로드 | 1차 지원: Vanilla, Paper, Purpur, Folia, Pufferfish, Leaf, Fabric, NeoForge, Velocity |
 | 플러그인/모드 관리 | 원격 매니페스트 (Modrinth API 등 모드 사이트 공개 API로 목록 조회 + 다운로드) + 직접 업로드 | 앱 업데이트 없이 최신 목록 반영. 구동기별 호환 필터링 |
-| 저장소 | SQLite | 서버/구동기/플러그인 메타데이터, 계정, 설정 |
+| 저장소 | SQLite | 서버/구동기/플러그인 메타데이터, 계정, 설정. Postgres/MySQL보다 유리한 이유는 6.1 참고 |
 | 프로세스 격리 | systemd-run / cgroup | 서버별 CPU/메모리 상한 |
 | 포트 포워딩 | UPnP(IGD): `github.com/huin/goupnp` + NAT-PMP 폴백: `github.com/jackpal/go-nat-pmp` | 순수 Go, Syncthing 등에서 검증된 조합. 실패 시 수동 설정 안내 |
 | DDNS 연동 (무료 서브도메인) | 능동 갱신: 공통 어댑터 인터페이스 + DuckDNS/No-IP/FreeDNS/Dynu 등 공식 API. **ipTime**은 능동 갱신 API가 없어(조사 완료) 참조·감시 전용으로만 지원 (DNS 조회 기반 불일치 감지) | 목표는 주요 무료 DDNS 제공자 전반 지원. 서버 1개만 할당 가능. 제공자별 장애가 서로 격리되도록 설계 |
@@ -193,6 +193,14 @@
 | Java 런타임 관리 | Eclipse Adoptium(Temurin) APT 저장소를 `postinst`에서 등록 후 `temurin-8-jre`/`temurin-17-jre`/`temurin-21-jre` 설치 | Debian Bookworm 공식 저장소엔 `openjdk-17`만 존재(8/21 없음, 검증 완료) → 3개 버전을 동일 벤더로 통일 설치 |
 | 패키징 | nfpm + systemd 유닛, `Depends: ca-certificates` (Java는 postinst에서 Adoptium 저장소로 설치) | `postinst`에서 전용 사용자 생성 + Adoptium 저장소 등록/Java 설치 + 서비스 enable/start, `postrm`에서 정리 |
 | 인증 | 세션 기반 (bcrypt + httpOnly 쿠키) | 외부 노출 시 HTTPS + TOTP 2FA 필수 |
+
+### 6.1 핵심 스택 선택 근거 (대안 대비)
+
+이 프로젝트는 "라즈베리파이에서 상시 구동하며 JVM 프로세스들에게 자원을 최대한 양보해야 하는 단일 정적 바이너리"(NFR-1, NFR-2, NFR-4)라는 제약이 스택 선택 전반을 관통한다. 각 선택은 이 제약을 기준으로 대안과 비교했을 때 우위가 있다.
+
+- **백엔드: Go (vs. Node.js/Python/JVM 기반, vs. Rust)** — GC가 있긴 하지만 Node/Python/JVM 런타임보다 훨씬 가볍고 상시 구동 시 유휴 메모리 사용량이 낮다. 단일 정적 바이너리로 arm64/armhf 크로스컴파일이 간단해 NFR-2(Pi 4/5 양쪽 아키텍처 지원)를 쉽게 만족한다. Rust를 썼다면 런타임 오버헤드는 더 줄었겠지만, WebSocket/RCON/UPnP/TOTP 등 이미 검증된 라이브러리 생태계와 개발 속도 면에서 이 프로젝트 규모엔 Go가 더 합리적인 중간 지점이다.
+- **프론트엔드: SvelteKit (vs. React 19)** — React는 가상 DOM diffing 런타임을 브라우저로 함께 보내야 해서 번들이 더 크지만, Svelte는 컴파일 타임에 반응형 갱신 코드를 직접 생성해 런타임이 거의 없다. Go 바이너리에 `embed.FS`로 통째로 내장하고 라즈베리파이에서 서빙하는 이 프로젝트 특성상 정적 빌드 산출물이 가벼운 쪽이 유리하다. 단, 이는 React 19의 강점(생태계 규모, 팀 숙련도, Server Components 등)이 필요 없는 "단일 관리 대시보드 + 정적 빌드 임베드" 규모에서 성립하는 판단이며, 팀이 React에 더 익숙하거나 향후 복잡한 생태계 통합이 필요해지면 뒤집힐 수 있다.
+- **저장소: SQLite (vs. Postgres/MySQL)** — 별도 서버 프로세스가 필요 없는 임베디드 DB라서 NFR-1(유휴 메모리 최소화)에 부합하고, apt 패키지 설치 시 DB 서버 설치/설정을 얹지 않아도 돼 NFR-4(표준 apt 흐름)와 크로스아키텍처 배포가 단순해진다. pure-Go SQLite 드라이버(cgo 미사용, NFR-9)를 채택해 `libsqlite3` 등 시스템 라이브러리 의존성 자체를 없앤 것도 Go 단일 바이너리 배포 철학과 한 세트다. 이 선택은 "단일 노드, 낮은 동시 쓰기 부하"를 전제로 하는데, NFR-3의 확장 방향이 여러 Pi 간 DB 공유가 아니라 Pi 5 + NVMe로의 단일 노드 내 스케일업이라 그 전제가 로드맵과 어긋나지 않는다.
 
 ## 7. 아키텍처 개요 (요약)
 

@@ -15,7 +15,8 @@
 		onSave,
 		checkingNow,
 		checkNowMessage,
-		onCheckNow
+		onCheckNow,
+		currentVersion
 	}: {
 		settings: UpdateSettings | null;
 		fetchError: string;
@@ -26,6 +27,7 @@
 		checkingNow: boolean;
 		checkNowMessage: string;
 		onCheckNow: () => void;
+		currentVersion: string;
 	} = $props();
 
 	const checkFrequencyLabels = $derived<Record<string, string>>({
@@ -40,6 +42,9 @@
 	<h2 class="font-medium">{$t('updateSettingsCard.title')}</h2>
 	<p class="text-muted-foreground mt-1 text-xs">
 		{$t('updateSettingsCard.description')}
+	</p>
+	<p class="text-muted-foreground mt-2 text-xs">
+		{$t('updateSettingsCard.currentVersion', { version: currentVersion || '-' })}
 	</p>
 
 	{#if fetchError}

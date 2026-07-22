@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { locale, setLocale, t, type Locale } from '$lib/i18n';
 
-	let { onStartTour }: { onStartTour: () => void } = $props();
+	let { onStartTour, currentVersion }: { onStartTour: () => void; currentVersion: string } =
+		$props();
 </script>
 
 <div class="space-y-4">
@@ -39,5 +40,32 @@
 		>
 			{$t('miscSettings.tour.replayButton')}
 		</button>
+	</div>
+
+	<div class="border-border bg-card rounded-lg border p-4">
+		<h2 class="font-medium">{$t('miscSettings.about.title')}</h2>
+		<dl class="mt-3 space-y-1.5 text-sm">
+			<div class="flex justify-between">
+				<dt class="text-muted-foreground">{$t('miscSettings.about.programName')}</dt>
+				<dd>CraftDeck</dd>
+			</div>
+			<div class="flex justify-between">
+				<dt class="text-muted-foreground">{$t('miscSettings.about.version')}</dt>
+				<dd class="font-mono">{currentVersion || '-'}</dd>
+			</div>
+			<div class="flex justify-between">
+				<dt class="text-muted-foreground">{$t('miscSettings.about.license')}</dt>
+				<dd>
+					<a
+						href="https://github.com/bestevan01/CraftDeck/blob/main/LICENSE"
+						target="_blank"
+						rel="noreferrer"
+						class="underline underline-offset-2"
+					>
+						MIT
+					</a>
+				</dd>
+			</div>
+		</dl>
 	</div>
 </div>

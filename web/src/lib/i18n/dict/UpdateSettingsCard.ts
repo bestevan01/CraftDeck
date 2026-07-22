@@ -13,6 +13,7 @@ export const messages = {
 		'updateSettingsCard.frequencyMonthly': '매달',
 		'updateSettingsCard.applying': '적용 중...',
 		'updateSettingsCard.apply': '적용',
+		'updateSettingsCard.currentVersion': '현재 버전: {version}',
 		'updateSettingsCard.currentStatus': '현재 채널: {channel} · 확인 주기: {frequency}',
 		'updateSettingsCard.checkingNow': '확인 중...',
 		'updateSettingsCard.checkNow': '지금 확인'
@@ -31,6 +32,7 @@ export const messages = {
 		'updateSettingsCard.frequencyMonthly': 'Monthly',
 		'updateSettingsCard.applying': 'Applying...',
 		'updateSettingsCard.apply': 'Apply',
+		'updateSettingsCard.currentVersion': 'Current version: {version}',
 		'updateSettingsCard.currentStatus': 'Current channel: {channel} · Check frequency: {frequency}',
 		'updateSettingsCard.checkingNow': 'Checking...',
 		'updateSettingsCard.checkNow': 'Check now'
