@@ -202,6 +202,14 @@ jobs:
             canary) components="canary" ;;
           esac
           for c in $components; do
+            # ONE-TIME migration: the version numbering was reset down to
+            # 0.1.0 (see release notes), which reprepro's normal
+            # includedeb refuses as a "downgrade" against whatever
+            # higher-numbered version is still recorded in apt-repo-state
+            # from before the reset. Remove first so the reset always
+            # lands regardless of ordering. Remove this block once the
+            # first post-reset release has published successfully.
+            reprepro -b packaging/apt-repo -C "$c" remove trixie craftdeck || true
             reprepro -b packaging/apt-repo -C "$c" includedeb trixie \
               "build/craftdeck_${{ steps.version.outputs.version }}_arm64.deb"
           done
