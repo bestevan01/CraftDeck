@@ -60,10 +60,12 @@ jobs:
         #           (tilde, not hyphen -- verified via `dpkg --compare-versions`
         #           that a literal hyphen here sorts a beta *above* its final
         #           release instead of below it, which is backwards)
-        #   canary: every push to main      -> "(last stable tag's patch+1).<commits since that tag>",
-        #           e.g. last stable v0.1.19 -> "0.1.20.<N>" -- deterministic,
-        #           no tag of its own needed, and always sorts above the
-        #           stable version it's built ahead of.
+        #   canary: every push to main      -> "(last stable tag's version).canary-<Nth canary build since that tag>",
+        #           e.g. last stable v0.1.0  -> "0.1.0.canary-1", then
+        #           "0.1.0.canary-2", ... -- deterministic, no tag of its
+        #           own needed. Verified via `dpkg --compare-versions` that
+        #           this sorts as stable < canary-1 < canary-2 < ... < next
+        #           stable (e.g. "0.1.0" < "0.1.0.canary-1" < "0.1.1").
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             tag="${GITHUB_REF_NAME#v}"
@@ -83,18 +85,13 @@ jobs:
               # No stable tag exists yet (first-ever release built from
               # main) -- count from the beginning of history instead of a
               # nonexistent tag ref.
-              major=0; minor=0; next_patch=1
+              base="0.0.0"
               count=$(git rev-list --count HEAD)
             else
               base="${last_stable#v}"
-              major="${base%%.*}"
-              rest="${base#*.}"
-              minor="${rest%%.*}"
-              patch="${rest#*.}"
-              next_patch=$((patch + 1))
               count=$(git rev-list --count "${last_stable}..HEAD")
             fi
-            version="${major}.${minor}.${next_patch}.${count}"
+            version="${base}.canary-${count}"
             channel=canary
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
