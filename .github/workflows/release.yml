@@ -202,13 +202,6 @@ jobs:
             canary) components="canary" ;;
           esac
           for c in $components; do
-            # ONE-TIME: republishing v0.1.0 with new content (see release
-            # notes) -- reprepro refuses to include a version that's
-            # already indexed, even with different bits, so remove the
-            # existing entry first. Safe right now because nothing has
-            # v0.1.0 itself installed yet (only canary/beta builds ahead of
-            # it). Remove this block after this one republish.
-            reprepro -b packaging/apt-repo -C "$c" remove trixie craftdeck || true
             reprepro -b packaging/apt-repo -C "$c" includedeb trixie \
               "build/craftdeck_${{ steps.version.outputs.version }}_arm64.deb"
           done
