@@ -14,6 +14,11 @@ on:
       - "v*"
     branches:
       - main
+    # 문서 전용 변경(README/LICENSE 등)은 canary 빌드를 유발할 필요가
+    # 없다 -- 코드가 하나도 안 바뀌었는데 버전 번호만 올라가는 걸 방지.
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
 
 permissions:
   contents: write
