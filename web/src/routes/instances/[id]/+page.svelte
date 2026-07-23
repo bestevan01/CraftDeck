@@ -22,6 +22,7 @@
 	import ReasonModal from '$lib/ReasonModal.svelte';
 	import PluginSearchModal from '$lib/PluginSearchModal.svelte';
 	import GameSettingsModal from '$lib/GameSettingsModal.svelte';
+	import ServerSettingsModal from '$lib/ServerSettingsModal.svelte';
 	import ManageTab from '$lib/ManageTab.svelte';
 	import PluginsTab from '$lib/PluginsTab.svelte';
 	import FilesTab from '$lib/FilesTab.svelte';
@@ -1362,21 +1363,10 @@
 			{loaderLabel}
 			{knownLoaders}
 			{proxyCapableLoaders}
-			{editingSettings}
 			{pendingRestart}
 			{restarting}
-			bind:settingsMemoryGB
-			bind:settingsCpu
-			bind:settingsGamePort
-			{canEditGamePort}
-			{maxMemoryGB}
-			{ramBoundaryGB}
-			{settingsError}
-			{settingsSaving}
 			onOpenSettingsEdit={openSettingsEdit}
 			onRestartForSettings={restartForSettings}
-			onSaveSettings={saveSettings}
-			onCancelSettingsEdit={cancelSettingsEdit}
 			{directlyReachable}
 			{networkAddresses}
 			{connectPort}
@@ -1546,5 +1536,22 @@
 	onSave={saveGameSettings}
 	onClose={closeGameSettingsModal}
 />
+
+{#if inst}
+	<ServerSettingsModal
+		open={editingSettings}
+		{inst}
+		bind:settingsMemoryGB
+		bind:settingsCpu
+		bind:settingsGamePort
+		{canEditGamePort}
+		{maxMemoryGB}
+		{ramBoundaryGB}
+		{settingsError}
+		{settingsSaving}
+		onSave={saveSettings}
+		onClose={cancelSettingsEdit}
+	/>
+{/if}
 
 <ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />

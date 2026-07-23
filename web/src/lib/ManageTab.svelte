@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Backup, BuildInfo, DomainConfig, Instance, NetworkAddresses, WorldInfo } from '$lib/api';
-	import MemorySlider from '$lib/MemorySlider.svelte';
 	import CopyButton from '$lib/CopyButton.svelte';
 	import { t } from '$lib/i18n';
 
@@ -9,22 +8,11 @@
 		loaderLabel,
 		knownLoaders,
 		proxyCapableLoaders,
-		// 서버 설정
-		editingSettings,
+		// 서버 설정 (편집 폼 자체는 ServerSettingsModal -- +page.svelte가 직접 연다)
 		pendingRestart,
 		restarting,
-		settingsMemoryGB = $bindable(1),
-		settingsCpu = $bindable(0),
-		settingsGamePort = $bindable(0),
-		canEditGamePort,
-		maxMemoryGB,
-		ramBoundaryGB,
-		settingsError,
-		settingsSaving,
 		onOpenSettingsEdit,
 		onRestartForSettings,
-		onSaveSettings,
-		onCancelSettingsEdit,
 		// 접속 주소
 		directlyReachable,
 		networkAddresses,
@@ -80,21 +68,10 @@
 		loaderLabel: (loader: string) => string;
 		knownLoaders: string[];
 		proxyCapableLoaders: string[];
-		editingSettings: boolean;
 		pendingRestart: boolean;
 		restarting: boolean;
-		settingsMemoryGB: number;
-		settingsCpu: number;
-		settingsGamePort: number;
-		canEditGamePort: boolean;
-		maxMemoryGB: number;
-		ramBoundaryGB: number;
-		settingsError: string;
-		settingsSaving: boolean;
 		onOpenSettingsEdit: () => void;
 		onRestartForSettings: () => void;
-		onSaveSettings: () => void;
-		onCancelSettingsEdit: () => void;
 		directlyReachable: boolean;
 		networkAddresses: NetworkAddresses | null;
 		connectPort: number;
@@ -171,11 +148,9 @@
 	<div class="border-border bg-card rounded-lg border p-4 {inst.kind !== 'server' ? 'md:col-span-2' : ''}">
 		<div class="flex items-center justify-between">
 			<h2 class="font-medium">{$t('manageTab.serverSettings.title')}</h2>
-			{#if !editingSettings}
-				<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onOpenSettingsEdit}
-					>{$t('manageTab.serverSettings.editButton')}</button
-				>
-			{/if}
+			<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onOpenSettingsEdit}
+				>{$t('manageTab.serverSettings.openButton')}</button
+			>
 		</div>
 
 		{#if pendingRestart}
@@ -192,88 +167,17 @@
 			</div>
 		{/if}
 
-		{#if editingSettings}
-			<div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-				{#if inst.kind === 'proxy'}
-					<div>
-						<span class="text-muted-foreground mb-1 block text-xs">{$t('manageTab.serverSettings.memoryAllocLabel')}</span>
-						<p class="mt-1.5 text-sm">{$t('manageTab.serverSettings.memoryFixed')}</p>
-					</div>
-				{:else}
-					<div>
-						<label class="text-muted-foreground mb-1 block text-xs" for="settings-memory">
-							{$t('manageTab.serverSettings.memoryLabelPrefix')}{$t('manageTab.serverSettings.memoryLabelValue', {
-								current: settingsMemoryGB,
-								max: maxMemoryGB
-							})}{#if ramBoundaryGB < maxMemoryGB}<span class="text-yellow-500"
-									>{$t('manageTab.serverSettings.swapIncluded', { swap: maxMemoryGB - ramBoundaryGB })}</span
-								>{/if})
-						</label>
-						<MemorySlider id="settings-memory" bind:value={settingsMemoryGB} maxGB={maxMemoryGB} {ramBoundaryGB} />
-					</div>
-				{/if}
-				<div>
-					<label class="text-muted-foreground mb-1 block text-xs" for="settings-cpu">
-						{$t('manageTab.serverSettings.cpuLabelPrefix')}{settingsCpu > 0
-							? `${settingsCpu}%`
-							: $t('manageTab.common.unlimited')})
-					</label>
-					<input
-						id="settings-cpu"
-						type="range"
-						min="0"
-						max="100"
-						step="5"
-						bind:value={settingsCpu}
-						class="w-full"
-					/>
-				</div>
-				{#if inst.kind === 'server'}
-					<div>
-						<label class="text-muted-foreground mb-1 block text-xs" for="settings-port">
-							{$t('manageTab.serverSettings.gamePortLabel')}
-						</label>
-						{#if canEditGamePort}
-							<input
-								id="settings-port"
-								type="number"
-								min="1024"
-								max="65535"
-								bind:value={settingsGamePort}
-								class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
-							/>
-						{:else}
-							<p class="mt-1.5 text-sm">{inst.game_port}</p>
-							<p class="text-muted-foreground mt-1 text-xs">
-								{$t('manageTab.serverSettings.gamePortLockedNote')}
-							</p>
-						{/if}
-					</div>
-				{/if}
-			</div>
-			{#if settingsError}
-				<p class="text-destructive mt-2 text-xs">{settingsError}</p>
+		<p class="text-muted-foreground mt-2 text-xs">
+			{$t('manageTab.serverSettings.memoryAllocLabel')} {inst.memory_max_mb > 0
+				? `${(inst.memory_max_mb / 1024).toFixed(1)}GB`
+				: $t('manageTab.common.unlimited')} · {$t('manageTab.serverSettings.cpuAllocLabel')} {inst.cpu_quota_percent >
+			0
+				? `${inst.cpu_quota_percent}%`
+				: $t('manageTab.common.unlimited')}
+			{#if inst.kind === 'server'}
+				· {$t('manageTab.serverSettings.gamePortLabel')} {inst.game_port}
 			{/if}
-			<div class="mt-3 flex gap-2">
-				<button
-					class="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-xs font-medium"
-					disabled={settingsSaving}
-					onclick={onSaveSettings}>{$t('manageTab.serverSettings.saveButton')}</button
-				>
-				<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onCancelSettingsEdit}
-					>{$t('manageTab.serverSettings.cancelButton')}</button
-				>
-			</div>
-		{:else}
-			<p class="text-muted-foreground mt-2 text-xs">
-				{$t('manageTab.serverSettings.memoryAllocLabel')} {inst.memory_max_mb > 0
-					? `${(inst.memory_max_mb / 1024).toFixed(1)}GB`
-					: $t('manageTab.common.unlimited')} · {$t('manageTab.serverSettings.cpuAllocLabel')} {inst.cpu_quota_percent >
-				0
-					? `${inst.cpu_quota_percent}%`
-					: $t('manageTab.common.unlimited')}
-			</p>
-		{/if}
+		</p>
 	</div>
 
 	<!-- server.properties GUI form (FR-12) -- a curated, labeled subset; anything
