@@ -104,7 +104,7 @@
 	</div>
 
 	<div
-		class="border-border bg-card flex flex-col rounded-lg border p-4 lg:w-1/2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]"
+		class="border-border bg-card flex min-h-0 flex-col overflow-hidden rounded-lg border p-4 lg:w-1/2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]"
 	>
 		<span class="text-muted-foreground mb-1 block shrink-0 text-xs"
 			>{$t('pluginsTab.installedLabel', { label: pluginTabLabel(inst.loader) })}</span
@@ -114,7 +114,7 @@
 				{$t('pluginsTab.installedEmpty', { label: pluginTabLabel(inst.loader) })}
 			</p>
 		{:else}
-			<div class="space-y-2.5 overflow-y-auto">
+			<div class="min-h-0 flex-1 space-y-2.5 overflow-y-auto">
 				{#each topLevelPlugins as p (p.id)}
 					<div>
 						{@render pluginRow(p)}
