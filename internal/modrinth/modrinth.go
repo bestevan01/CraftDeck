@@ -77,6 +77,24 @@ type Version struct {
 	Files         []VersionFile `json:"files"`
 }
 
+// Project is the subset of a Modrinth project's details CraftDeck needs --
+// just enough to show the mod/plugin's real display name instead of its
+// downloaded jar filename.
+type Project struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// GetProject fetches projectID's details (FR-6, display name for installed
+// plugins/mods).
+func GetProject(ctx context.Context, projectID string) (*Project, error) {
+	var p Project
+	if err := getJSON(ctx, apiBase+"/project/"+url.PathEscape(projectID), &p); err != nil {
+		return nil, fmt.Errorf("modrinth project: %w", err)
+	}
+	return &p, nil
+}
+
 // ProjectVersions lists every published version of a project, newest first
 // (Modrinth's own ordering).
 func ProjectVersions(ctx context.Context, projectID string) ([]Version, error) {

@@ -182,6 +182,16 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		return nil, err
 	}
 
+	// Best-effort: the UI shows this instead of the on-disk jar filename,
+	// but a lookup failure here shouldn't block the actual install --
+	// falls back to filename on the frontend if left empty.
+	var title string
+	if proj, err := modrinth.GetProject(ctx, projectID); err != nil {
+		log.Printf("fetch project title for %s: %v (continuing)", projectID, err)
+	} else {
+		title = proj.Title
+	}
+
 	pluginsDir := filepath.Join(inst.WorkDir, pluginsDirName(inst.Loader))
 	if err := os.MkdirAll(pluginsDir, 0o750); err != nil {
 		return nil, err
@@ -210,6 +220,7 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		ModrinthProjectID:     projectID,
 		ModrinthVersionID:     version.ID,
 		Filename:              file.Filename,
+		Title:                 title,
 		SHA512:                expectedSHA512,
 		Enabled:               true,
 		InstalledAsDependency: parentID != "",

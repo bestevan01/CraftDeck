@@ -919,7 +919,7 @@
 	}
 
 	function deletePlugin(p: Plugin) {
-		askConfirm($t('instanceDetailPage.plugins.deleteConfirm', { filename: p.filename }), () =>
+		askConfirm($t('instanceDetailPage.plugins.deleteConfirm', { filename: p.title || p.filename }), () =>
 			doDeletePlugin(p)
 		);
 	}

@@ -310,6 +310,7 @@ export type Plugin = {
 	modrinth_project_id?: string;
 	modrinth_version_id?: string;
 	filename: string;
+	title?: string;
 	sha512?: string;
 	enabled: boolean;
 	installed_as_dependency: boolean;

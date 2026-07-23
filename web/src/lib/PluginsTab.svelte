@@ -50,8 +50,8 @@
 
 {#snippet pluginRow(p: Plugin, dependencyOfLabel?: string)}
 	<div class="border-border flex items-center justify-between rounded-md border px-2 py-1.5 text-xs">
-		<span>
-			{p.filename}
+		<span title={p.filename}>
+			{p.title || p.filename}
 			{#if !p.enabled}<span class="text-muted-foreground">{$t('pluginsTab.disabledTag')}</span>{/if}
 			{#if dependencyOfLabel}<span class="text-muted-foreground">{dependencyOfLabel}</span>{/if}
 		</span>
@@ -73,69 +73,74 @@
 {/snippet}
 
 <div class="border-border bg-card rounded-lg border p-4">
-	<div class="flex items-center justify-between">
-		<h2 class="font-medium">{pluginTabLabel(inst.loader)}</h2>
-		{#if searchCapableLoaders.includes(inst.loader)}
-			<button
-				class="border-border rounded-md border px-3 py-1.5 text-xs"
-				onclick={onOpenPluginSearchModal}>{$t('pluginsTab.searchOnModrinth')}</button
-			>
-		{/if}
-	</div>
-	<p class="text-muted-foreground mt-1 text-xs">{$t('pluginsTab.restartNotice')}</p>
+	<h2 class="font-medium">{pluginTabLabel(inst.loader)}</h2>
 
-	<div class="mt-4">
-		<span class="text-muted-foreground mb-1 block text-xs">{$t('pluginsTab.uploadLabel')}</span>
-		<input
-			type="file"
-			accept=".jar"
-			disabled={uploadingPlugin}
-			onchange={onPluginFileChange}
-			class="text-muted-foreground file:border-border file:bg-background file:text-foreground file:mr-2 file:rounded-md file:border file:px-3 file:py-1.5 file:text-xs file:font-medium file:cursor-pointer text-xs"
-		/>
-		{#if uploadingPlugin}
-			<span class="text-muted-foreground ml-2 text-xs">{$t('pluginsTab.uploading')}</span>
-		{/if}
-	</div>
+	<div class="mt-3 flex flex-col gap-6 lg:flex-row">
+		<div class="lg:w-1/2">
+			<p class="text-muted-foreground text-xs">{$t('pluginsTab.restartNotice')}</p>
 
-	{#if pluginsError}
-		<p class="text-destructive mt-2 text-xs">{pluginsError}</p>
-	{/if}
-	<div class="mt-3">
-		<span class="text-muted-foreground mb-1 block text-xs"
-			>{$t('pluginsTab.installedLabel', { label: pluginTabLabel(inst.loader) })}</span
-		>
-		{#if plugins.length === 0}
-			<p class="text-muted-foreground text-xs">
-				{$t('pluginsTab.installedEmpty', { label: pluginTabLabel(inst.loader) })}
-			</p>
-		{:else}
-			<div class="space-y-2.5">
-				{#each topLevelPlugins as p (p.id)}
-					<div>
-						{@render pluginRow(p)}
-						{#if childrenOf(p.id).length > 0}
-							<div class="border-border mt-1.5 ml-4 space-y-1.5 border-l pl-2.5">
-								{#each childrenOf(p.id) as dep (dep.id)}
-									{@render pluginRow(dep, $t('pluginsTab.dependencyOf', { parent: p.filename }))}
-								{/each}
-							</div>
-						{/if}
-					</div>
-				{/each}
-				{#if orphanDependencies.length > 0}
-					<div>
-						<span class="text-muted-foreground mb-1.5 block text-xs"
-							>{$t('pluginsTab.otherDependenciesLabel')}</span
-						>
-						<div class="space-y-1.5">
-							{#each orphanDependencies as dep (dep.id)}
-								{@render pluginRow(dep)}
-							{/each}
-						</div>
-					</div>
+			<div class="mt-4">
+				<span class="text-muted-foreground mb-1 block text-xs">{$t('pluginsTab.uploadLabel')}</span>
+				<input
+					type="file"
+					accept=".jar"
+					disabled={uploadingPlugin}
+					onchange={onPluginFileChange}
+					class="text-muted-foreground file:border-border file:bg-background file:text-foreground file:mr-2 file:rounded-md file:border file:px-3 file:py-1.5 file:text-xs file:font-medium file:cursor-pointer text-xs"
+				/>
+				{#if uploadingPlugin}
+					<span class="text-muted-foreground ml-2 text-xs">{$t('pluginsTab.uploading')}</span>
 				{/if}
 			</div>
-		{/if}
+
+			{#if searchCapableLoaders.includes(inst.loader)}
+				<button
+					class="border-border mt-4 rounded-md border px-3 py-1.5 text-xs"
+					onclick={onOpenPluginSearchModal}>{$t('pluginsTab.searchOnModrinth')}</button
+				>
+			{/if}
+
+			{#if pluginsError}
+				<p class="text-destructive mt-2 text-xs">{pluginsError}</p>
+			{/if}
+		</div>
+
+		<div class="border-border lg:w-1/2 lg:border-l lg:pl-6">
+			<span class="text-muted-foreground mb-1 block text-xs"
+				>{$t('pluginsTab.installedLabel', { label: pluginTabLabel(inst.loader) })}</span
+			>
+			{#if plugins.length === 0}
+				<p class="text-muted-foreground text-xs">
+					{$t('pluginsTab.installedEmpty', { label: pluginTabLabel(inst.loader) })}
+				</p>
+			{:else}
+				<div class="space-y-2.5">
+					{#each topLevelPlugins as p (p.id)}
+						<div>
+							{@render pluginRow(p)}
+							{#if childrenOf(p.id).length > 0}
+								<div class="border-border mt-1.5 ml-4 space-y-1.5 border-l pl-2.5">
+									{#each childrenOf(p.id) as dep (dep.id)}
+										{@render pluginRow(dep, $t('pluginsTab.dependencyOf', { parent: p.title || p.filename }))}
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/each}
+					{#if orphanDependencies.length > 0}
+						<div>
+							<span class="text-muted-foreground mb-1.5 block text-xs"
+								>{$t('pluginsTab.otherDependenciesLabel')}</span
+							>
+							<div class="space-y-1.5">
+								{#each orphanDependencies as dep (dep.id)}
+									{@render pluginRow(dep)}
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
