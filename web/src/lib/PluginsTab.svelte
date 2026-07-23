@@ -72,7 +72,7 @@
 	</div>
 {/snippet}
 
-<div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+<div class="flex flex-col gap-4 lg:h-full lg:flex-row lg:items-start">
 	<div class="border-border bg-card max-h-[26rem] overflow-y-auto rounded-lg border p-4 lg:w-1/2">
 		<h2 class="font-medium">{pluginTabLabel(inst.loader)}</h2>
 		<p class="text-muted-foreground mt-1 text-xs">{$t('pluginsTab.restartNotice')}</p>
@@ -104,7 +104,7 @@
 	</div>
 
 	<div
-		class="border-border bg-card flex min-h-0 flex-col overflow-hidden rounded-lg border p-4 lg:w-1/2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]"
+		class="border-border bg-card flex min-h-0 flex-col overflow-hidden rounded-lg border p-4 lg:h-full lg:w-1/2 lg:self-stretch"
 	>
 		<span class="text-muted-foreground mb-1 block shrink-0 text-xs"
 			>{$t('pluginsTab.installedLabel', { label: pluginTabLabel(inst.loader) })}</span
