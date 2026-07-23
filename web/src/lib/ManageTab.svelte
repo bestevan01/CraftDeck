@@ -147,9 +147,23 @@
 <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 	<div class="border-border bg-card rounded-lg border p-4 {inst.kind !== 'server' ? 'md:col-span-2' : ''}">
 		<div class="flex items-center justify-between">
-			<h2 class="font-medium">{$t('manageTab.serverSettings.title')}</h2>
-			<button class="border-border rounded-md border px-3 py-1.5 text-xs" onclick={onOpenSettingsEdit}
-				>{$t('manageTab.serverSettings.openButton')}</button
+			<div>
+				<h2 class="font-medium">{$t('manageTab.serverSettings.title')}</h2>
+				<p class="text-muted-foreground mt-1 text-xs">
+					{$t('manageTab.serverSettings.memoryAllocLabel')} {inst.memory_max_mb > 0
+						? `${(inst.memory_max_mb / 1024).toFixed(1)}GB`
+						: $t('manageTab.common.unlimited')} · {$t('manageTab.serverSettings.cpuAllocLabel')} {inst.cpu_quota_percent >
+					0
+						? `${inst.cpu_quota_percent}%`
+						: $t('manageTab.common.unlimited')}
+					{#if inst.kind === 'server'}
+						· {$t('manageTab.serverSettings.gamePortLabel')} {inst.game_port}
+					{/if}
+				</p>
+			</div>
+			<button
+				class="border-border shrink-0 rounded-md border px-3 py-1.5 text-xs"
+				onclick={onOpenSettingsEdit}>{$t('manageTab.serverSettings.openButton')}</button
 			>
 		</div>
 
@@ -166,18 +180,6 @@
 				>
 			</div>
 		{/if}
-
-		<p class="text-muted-foreground mt-2 text-xs">
-			{$t('manageTab.serverSettings.memoryAllocLabel')} {inst.memory_max_mb > 0
-				? `${(inst.memory_max_mb / 1024).toFixed(1)}GB`
-				: $t('manageTab.common.unlimited')} · {$t('manageTab.serverSettings.cpuAllocLabel')} {inst.cpu_quota_percent >
-			0
-				? `${inst.cpu_quota_percent}%`
-				: $t('manageTab.common.unlimited')}
-			{#if inst.kind === 'server'}
-				· {$t('manageTab.serverSettings.gamePortLabel')} {inst.game_port}
-			{/if}
-		</p>
 	</div>
 
 	<!-- server.properties GUI form (FR-12) -- a curated, labeled subset; anything
