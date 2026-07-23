@@ -582,17 +582,33 @@ func (s *Server) handleReinstallLoader(w http.ResponseWriter, r *http.Request) {
 type updateInstanceRequest struct {
 	CPUQuotaPercent int `json:"cpu_quota_percent"`
 	MemoryMaxMB     int `json:"memory_max_mb"`
+	// GamePort is 0 when the operator isn't touching it (0 is never a valid
+	// port, so this doubles as "field not provided" without needing a
+	// pointer). Only honored for a server that isn't sitting behind the
+	// proxy -- see the eligibility check below.
+	GamePort int `json:"game_port"`
 }
 
-// handleUpdateInstance edits the resource-allocation fields (FR-12). The
-// game_port is intentionally not editable here -- it's auto-assigned once at
-// creation and never surfaced to the operator (see nextFreeGamePort), so
-// there's nothing meaningful for this endpoint to change about it.
+// handleUpdateInstance edits the resource-allocation fields (FR-12), plus,
+// for an independently-exposed server, its game_port.
 //
-// Allowed even while the instance is running: CPU/memory limits are only
-// ever applied to a fresh process, so writing the new values now has no
+// CPU/memory limits are allowed even while the instance is running: they're
+// only ever applied to a fresh process, so writing the new values now has no
 // effect on the currently-running unit -- they simply take effect the next
 // time the operator restarts it (see handleRestartInstance).
+//
+// game_port used to be flatly non-editable -- auto-assigned once at creation
+// and never surfaced to the operator (see nextFreeGamePort) -- because a
+// server sitting behind the proxy is reached by subdomain and never needs
+// its raw port known or changed, and provisionServerFiles only wrote
+// server.properties once, at creation. An independently-exposed server has
+// neither of those excuses: its port is the only way in, and an operator
+// forwarding/opening it on their router legitimately needs to be able to
+// pick a specific number instead of whatever nextFreeGamePort happened to
+// land on. So it's now editable, but only for that case -- a server
+// registered behind the proxy stays locked (see serverSubdomain below),
+// since changing its game_port there wouldn't do anything but desync the
+// proxy's backend entry.
 func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := r.PathValue("id")
@@ -620,7 +636,40 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 		req.MemoryMaxMB = proxyMemoryMaxMB
 	}
 
-	if err := s.instances.UpdateSettings(ctx, id, inst.GamePort, inst.RCONPort, req.CPUQuotaPercent, req.MemoryMaxMB); err != nil {
+	gamePort := inst.GamePort
+	rconPort := inst.RCONPort
+	if req.GamePort != 0 && req.GamePort != inst.GamePort {
+		if inst.Kind != instance.KindServer {
+			http.Error(w, "game port can only be changed for server instances", http.StatusBadRequest)
+			return
+		}
+		if req.GamePort < 1024 || req.GamePort > 65535 {
+			http.Error(w, "game_port must be between 1024 and 65535", http.StatusBadRequest)
+			return
+		}
+		if _, registered, err := s.serverSubdomain(ctx, id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		} else if registered {
+			http.Error(w, "instance is registered behind the proxy; switch it to independent exposure before changing its port", http.StatusBadRequest)
+			return
+		}
+		if inUse, err := s.gamePortInUse(ctx, req.GamePort, id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		} else if inUse {
+			http.Error(w, "that port is already used by another instance", http.StatusConflict)
+			return
+		}
+		gamePort = req.GamePort
+		rconPort = gamePort + 10000
+		if err := updateServerPropertiesPort(inst.WorkDir, gamePort, rconPort); err != nil {
+			http.Error(w, fmt.Sprintf("failed to update server.properties: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := s.instances.UpdateSettings(ctx, id, gamePort, rconPort, req.CPUQuotaPercent, req.MemoryMaxMB); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -631,6 +680,39 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// updateServerPropertiesPort rewrites just the server-port and rcon.port
+// lines of an existing server.properties in place, leaving every other line
+// (motd, difficulty, whatever the operator has changed since creation via
+// the 파일 tab) untouched. Appends the keys if they're missing rather than
+// erroring, since a heavily hand-edited file might not have them in the
+// exact form provisionServerFiles originally wrote.
+func updateServerPropertiesPort(workDir string, gamePort, rconPort int) error {
+	path := filepath.Join(workDir, "server.properties")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read server.properties: %w", err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	sawPort, sawRcon := false, false
+	for i, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "server-port="):
+			lines[i] = fmt.Sprintf("server-port=%d", gamePort)
+			sawPort = true
+		case strings.HasPrefix(line, "rcon.port="):
+			lines[i] = fmt.Sprintf("rcon.port=%d", rconPort)
+			sawRcon = true
+		}
+	}
+	if !sawPort {
+		lines = append(lines, fmt.Sprintf("server-port=%d", gamePort))
+	}
+	if !sawRcon {
+		lines = append(lines, fmt.Sprintf("rcon.port=%d", rconPort))
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o640)
 }
 
 func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {

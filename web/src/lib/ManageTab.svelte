@@ -15,6 +15,8 @@
 		restarting,
 		settingsMemoryGB = $bindable(1),
 		settingsCpu = $bindable(0),
+		settingsGamePort = $bindable(0),
+		canEditGamePort,
 		maxMemoryGB,
 		ramBoundaryGB,
 		settingsError,
@@ -83,6 +85,8 @@
 		restarting: boolean;
 		settingsMemoryGB: number;
 		settingsCpu: number;
+		settingsGamePort: number;
+		canEditGamePort: boolean;
 		maxMemoryGB: number;
 		ramBoundaryGB: number;
 		settingsError: string;
@@ -224,6 +228,28 @@
 						class="w-full"
 					/>
 				</div>
+				{#if inst.kind === 'server'}
+					<div>
+						<label class="text-muted-foreground mb-1 block text-xs" for="settings-port">
+							{$t('manageTab.serverSettings.gamePortLabel')}
+						</label>
+						{#if canEditGamePort}
+							<input
+								id="settings-port"
+								type="number"
+								min="1024"
+								max="65535"
+								bind:value={settingsGamePort}
+								class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
+							/>
+						{:else}
+							<p class="mt-1.5 text-sm">{inst.game_port}</p>
+							<p class="text-muted-foreground mt-1 text-xs">
+								{$t('manageTab.serverSettings.gamePortLockedNote')}
+							</p>
+						{/if}
+					</div>
+				{/if}
 			</div>
 			{#if settingsError}
 				<p class="text-destructive mt-2 text-xs">{settingsError}</p>

@@ -1116,10 +1116,17 @@
 		// still counted against the total in start()'s projectedMB check, but
 		// it isn't offered here as something the operator can shrink.
 		const adjustableOthers = runningOthers.filter((i) => i.kind !== 'proxy');
+		// Rounds up, not to nearest -- conflictMaxGB below rounds the budget
+		// *down* (Math.floor), so if this rounded to nearest instead, a
+		// genuine sub-GB overage (e.g. 30.47GB needed vs 30.37GB available)
+		// could display as an identical "30GB / 30GB", making the modal look
+		// like it triggered for no reason (confirmed: exactly this). Rounding
+		// up here guarantees a real overage always shows as bigger-than-budget
+		// on screen too.
 		conflictItems = [target, ...adjustableOthers].map((i) => ({
 			id: i.id,
 			name: i.name,
-			memoryGB: Math.max(1, Math.round(i.memory_max_mb / 1024) || 1),
+			memoryGB: Math.max(1, Math.ceil(i.memory_max_mb / 1024) || 1),
 			isTarget: i.id === target.id,
 			isRunning: i.status === 'running' || i.status === 'starting'
 		}));
@@ -1468,6 +1475,8 @@
 					upgrading={proxyUpgrading}
 					upgradeError={proxyUpgradeError}
 					onUpgrade={upgradeProxy}
+					proxyId={instances.find((i) => i.kind === 'proxy')?.id}
+					{instances}
 				/>
 			{/if}
 

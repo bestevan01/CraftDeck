@@ -243,6 +243,7 @@
 			if (!appliedInitialized) {
 				appliedCpu = inst.cpu_quota_percent;
 				appliedMemoryMB = inst.memory_max_mb;
+				appliedGamePort = inst.game_port;
 				appliedInitialized = true;
 			}
 			computePendingRestart();
@@ -397,26 +398,34 @@
 		setTimeout(refreshWhitelist, 500);
 	}
 
-	// CPU/memory settings (FR-12). game_port is auto-assigned once at
-	// creation and never surfaced here -- see nextFreeGamePort on the
-	// backend. Editable even while the instance is running -- CPU/memory
-	// limits are only ever applied to a fresh process, so a save just writes
-	// the new values without touching the running unit. They take effect
-	// once the operator explicitly restarts (pendingRestart flags that).
+	// CPU/memory settings (FR-12). Editable even while the instance is
+	// running -- CPU/memory limits are only ever applied to a fresh process,
+	// so a save just writes the new values without touching the running
+	// unit. They take effect once the operator explicitly restarts
+	// (pendingRestart flags that).
+	//
+	// game_port used to be flatly non-editable (auto-assigned at creation,
+	// never surfaced here). It's now editable, but only for a server that
+	// isn't registered behind the proxy -- one that is gets there by
+	// subdomain and is bound to 127.0.0.1, so its own game_port is neither
+	// reachable nor meaningful to change. Mirrors the same
+	// `!subdomain?.registered` check connectPort above already uses.
 	let editingSettings = $state(false);
 	let settingsCpu = $state(0); // percent, 0 = unlimited
 	let settingsMemoryGB = $state(1);
+	let settingsGamePort = $state(25566);
 	let settingsError = $state('');
 	let settingsSaving = $state(false);
 	let pendingRestart = $state(false);
 	let restarting = $state(false);
-	// Snapshot of the CPU/memory values actually in effect on the
+	// Snapshot of the CPU/memory/game_port values actually in effect on the
 	// currently-running process, so we can tell a real pending change (needs
 	// a restart) apart from the operator editing settings and then putting
 	// them back to what's already running -- in which case the restart
 	// button should disappear again rather than stay stuck on.
 	let appliedCpu = 0;
 	let appliedMemoryMB = 0;
+	let appliedGamePort = 0;
 	let appliedInitialized = false;
 
 	function computePendingRestart() {
@@ -425,7 +434,9 @@
 			return;
 		}
 		pendingRestart =
-			inst.cpu_quota_percent !== appliedCpu || inst.memory_max_mb !== appliedMemoryMB;
+			inst.cpu_quota_percent !== appliedCpu ||
+			inst.memory_max_mb !== appliedMemoryMB ||
+			inst.game_port !== appliedGamePort;
 	}
 	// Raspberry Pi's total RAM in GB, used to cap the memory slider -- filled
 	// in from /api/system/resources on mount; 1 is just a safe placeholder
@@ -471,6 +482,7 @@
 			maxMemoryGB,
 			Math.max(1, Math.round(inst.memory_max_mb / 1024) || 1)
 		);
+		settingsGamePort = inst.game_port;
 		settingsError = '';
 		editingSettings = true;
 	}
@@ -483,7 +495,8 @@
 		try {
 			inst = await api.updateInstance(id, {
 				cpu_quota_percent: settingsCpu,
-				memory_max_mb: settingsMemoryGB * 1024
+				memory_max_mb: settingsMemoryGB * 1024,
+				...(canEditGamePort ? { game_port: settingsGamePort } : {})
 			});
 			editingSettings = false;
 			computePendingRestart();
@@ -505,6 +518,7 @@
 			if (inst) {
 				appliedCpu = inst.cpu_quota_percent;
 				appliedMemoryMB = inst.memory_max_mb;
+				appliedGamePort = inst.game_port;
 			}
 			computePendingRestart();
 		} finally {
@@ -1007,6 +1021,12 @@
 			: (inst?.game_port ?? 0)
 	);
 
+	// Mirrors the same "registered behind the proxy?" check connectPort just
+	// used above -- a registered server is reached by subdomain and bound to
+	// 127.0.0.1, so its own game_port isn't reachable or meaningful to
+	// change (see canEditGamePort's backend-side twin in handleUpdateInstance).
+	let canEditGamePort = $derived(inst?.kind === 'server' && !subdomain?.registered);
+
 	// The domain-based address to show, if any -- three cases:
 	//   - proxy 인스턴스 자신: 등록된 서브도메인이 없는 접속(기본/우선순위
 	//     라우팅)이 도달하는 곳이므로 도메인 자체를 그대로 보여준다.
@@ -1347,6 +1367,8 @@
 			{restarting}
 			bind:settingsMemoryGB
 			bind:settingsCpu
+			bind:settingsGamePort
+			{canEditGamePort}
 			{maxMemoryGB}
 			{ramBoundaryGB}
 			{settingsError}

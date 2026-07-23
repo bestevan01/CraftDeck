@@ -117,6 +117,13 @@ export type ProxyStatus = {
 	update_available: boolean;
 };
 
+export type ProxyBackend = {
+	proxy_id: string;
+	backend_instance_id: string;
+	priority: number;
+	forced_host?: string;
+};
+
 export type CraftdeckVersion = {
 	current_version: string;
 	latest_version?: string;
@@ -411,8 +418,10 @@ export const api = {
 			throw new Error(text || `${res.status} ${res.statusText}`);
 		}
 	},
-	updateInstance: (id: string, body: { cpu_quota_percent: number; memory_max_mb: number }) =>
-		req<Instance>(`/api/instances/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+	updateInstance: (
+		id: string,
+		body: { cpu_quota_percent: number; memory_max_mb: number; game_port?: number }
+	) => req<Instance>(`/api/instances/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
 	// FR-4, scoped to "redownload the same loader for the same mc_version" --
 	// see handleReinstallLoader. Omit loaderVersion (or pass '') for "always
 	// latest"; pass a loader.BuildInfo.ID from listLoaderBuilds to pin one
@@ -490,6 +499,21 @@ export const api = {
 	unregisterFromProxy: (id: string) =>
 		req<{ ok: boolean }>(`/api/instances/${id}/proxy/unregister`, { method: 'POST' }),
 	getProxyStatus: () => req<ProxyStatus>('/api/proxy/status'),
+	getProxyBackends: (proxyId: string) =>
+		req<ProxyBackend[]>(`/api/instances/${proxyId}/proxy/backends`),
+	// Replaces the whole backend list -- pass every backend back, not just
+	// the ones that moved (see handleSetProxyBackends).
+	setProxyBackends: (proxyId: string, backends: ProxyBackend[]) =>
+		req<ProxyBackend[]>(`/api/instances/${proxyId}/proxy/backends`, {
+			method: 'PUT',
+			body: JSON.stringify({
+				backends: backends.map((b) => ({
+					backend_instance_id: b.backend_instance_id,
+					priority: b.priority,
+					forced_host: b.forced_host ?? ''
+				}))
+			})
+		}),
 	// File manager (FR-12 and beyond): Explorer/Finder-style browsing of an
 	// instance's whole work dir -- list/read/write/download/upload/rename/
 	// delete, all path-traversal-checked server-side (see

@@ -17,6 +17,8 @@ export const messages = {
 		'manageTab.serverSettings.cancelButton': '취소',
 		'manageTab.serverSettings.memoryAllocLabel': '메모리 할당',
 		'manageTab.serverSettings.cpuAllocLabel': 'CPU 할당',
+		'manageTab.serverSettings.gamePortLabel': '접속 포트',
+		'manageTab.serverSettings.gamePortLockedNote': '프록시에 등록된 서버는 포트를 변경할 수 없습니다. 독립 노출로 전환하면 변경할 수 있습니다.',
 
 		'manageTab.gameplaySettings.title': '게임플레이 설정',
 		'manageTab.gameplaySettings.descPrefix': '난이도, 게임 모드, 최대 인원 등 자주 쓰는',
@@ -102,6 +104,9 @@ export const messages = {
 		'manageTab.serverSettings.cancelButton': 'Cancel',
 		'manageTab.serverSettings.memoryAllocLabel': 'Memory allocation',
 		'manageTab.serverSettings.cpuAllocLabel': 'CPU allocation',
+		'manageTab.serverSettings.gamePortLabel': 'Connection port',
+		'manageTab.serverSettings.gamePortLockedNote':
+			"A server registered behind the proxy can't have its port changed. Switch to independent exposure first.",
 
 		'manageTab.gameplaySettings.title': 'Gameplay settings',
 		'manageTab.gameplaySettings.descPrefix': 'Commonly used',
