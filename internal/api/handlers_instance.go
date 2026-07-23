@@ -193,6 +193,25 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("instance created, but failed to register it behind the proxy: %v", err), http.StatusInternalServerError)
 			return
 		}
+	} else if req.ExposeIndependently {
+		// Record the operator's explicit choice the same way
+		// unregisterServerFromProxyCore does -- otherwise this instance is
+		// merely "not registered yet" as far as ReconcileProxyMode can tell
+		// (proxy_opt_out defaults to false), and the very next daemon
+		// restart (e.g. a self-update) auto-registers it behind the proxy
+		// after all, silently undoing the operator's creation-time choice
+		// (confirmed: exactly this, on a Fabric server created with
+		// "독립 노출" checked that got swept into the proxy after later
+		// restarts). Loaders/versions that are only independent for
+		// *structural* reasons (Vanilla, no main domain yet, an
+		// unsupported NeoForge forwarding-mod version) deliberately don't
+		// set this -- ReconcileProxyMode re-evaluates those from scratch
+		// every time it runs, so they should pick up proxy registration
+		// automatically if the situation changes (e.g. a domain gets
+		// added later), which is the intended default.
+		if err := s.instances.SetProxyOptOut(r.Context(), inst.ID, true); err != nil {
+			log.Printf("create %s: record explicit proxy opt-out (continuing anyway): %v", inst.ID, err)
+		}
 	}
 	writeJSON(w, http.StatusCreated, inst)
 }
@@ -799,8 +818,21 @@ func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
 
 // stopInstanceCore does the actual work of stopping an instance's systemd
 // unit and RCON connection; shared by handleStopInstance and
-// handleRestartInstance.
-func (s *Server) stopInstanceCore(ctx context.Context, inst *instance.Instance) error {
+// handleRestartInstance. Deliberately ignores the caller's (request-scoped)
+// ctx and runs on its own background context instead: a graceful RCON stop
+// can take up to ~30s and the systemd fallback up to TimeoutStopSec=300s
+// (see Supervisor.Start), comfortably longer than most reverse-proxy/
+// browser timeouts. If the client or an intermediate proxy gives up and
+// drops the connection mid-stop, r.Context() gets canceled -- and since
+// every DB write and subprocess call below was passed that same ctx, the
+// instance would actually stop fine but the final UpdateStatus(Stopped)
+// write would silently fail, leaving instances.status stuck on "stopping"
+// forever even though the server was really down (confirmed: exactly this,
+// on a Fabric/Create instance whose world save routinely ran past a
+// minute). A background context can't be canceled by the request going
+// away, so the status write always lands once the stop actually finishes.
+func (s *Server) stopInstanceCore(_ context.Context, inst *instance.Instance) error {
+	ctx := context.Background()
 	// StatusStopping exists precisely for this multi-second window (a
 	// graceful RCON stop can take up to ~30s for a big world to save) but
 	// was never actually being set anywhere -- the operator's "종료"
@@ -900,7 +932,11 @@ func (s *Server) handleRestartInstance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.startInstanceCore(ctx, inst); err != nil {
+	// Same reasoning as stopInstanceCore above: by the time a slow stop
+	// phase finishes, a client/proxy that gave up waiting would have
+	// already canceled r.Context(), which must not stop the follow-up
+	// start from actually happening.
+	if err := s.startInstanceCore(context.Background(), inst); err != nil {
 		if errors.Is(err, errNoServerJar) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return

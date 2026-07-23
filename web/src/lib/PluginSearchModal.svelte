@@ -25,6 +25,11 @@
 	} = $props();
 
 	let pressedBackdrop = false;
+	let searchInputEl = $state<HTMLInputElement | null>(null);
+
+	$effect(() => {
+		if (open) searchInputEl?.focus();
+	});
 </script>
 
 {#if open}
@@ -53,6 +58,7 @@
 			</div>
 			<form class="flex gap-2" onsubmit={onSearch}>
 				<input
+					bind:this={searchInputEl}
 					bind:value={query}
 					placeholder={$t('pluginSearchModal.searchPlaceholder', { loaderLabel })}
 					class="border-input bg-background w-full min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"
