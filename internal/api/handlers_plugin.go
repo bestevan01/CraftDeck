@@ -147,7 +147,7 @@ func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	installed, err := s.installModrinthPlugin(ctx, inst, req.ProjectID, false)
+	installed, err := s.installModrinthPlugin(ctx, inst, req.ProjectID, "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -158,11 +158,15 @@ func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 // installModrinthPlugin downloads projectID's newest version compatible
 // with inst's loader/Minecraft version, verifies its SHA-512 against what
 // Modrinth published (FR-6d), and recursively installs any required
-// dependency that isn't already present (FR-6c). asDependency marks
-// whether this call is itself satisfying another plugin's dependency, so
-// the UI can show it was pulled in automatically rather than by the
-// operator directly.
-func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Instance, projectID string, asDependency bool) (*plugin.Plugin, error) {
+// dependency that isn't already present (FR-6c). parentID is the ID of the
+// plugin whose dependency resolution triggered this install, or "" for a
+// top-level install the operator requested directly -- recorded so the UI
+// can group auto-installed dependencies under the plugin that pulled them
+// in instead of showing an undifferentiated flat list. When a dependency
+// is shared by multiple plugins, it's grouped under whichever one
+// triggered its install first (FindByModrinthProject below short-circuits
+// any later ones).
+func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Instance, projectID string, parentID string) (*plugin.Plugin, error) {
 	if existing, err := s.plugins.FindByModrinthProject(ctx, inst.ID, projectID); err != nil {
 		return nil, err
 	} else if existing != nil {
@@ -208,7 +212,8 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		Filename:              file.Filename,
 		SHA512:                expectedSHA512,
 		Enabled:               true,
-		InstalledAsDependency: asDependency,
+		InstalledAsDependency: parentID != "",
+		ParentPluginID:        parentID,
 	}
 	if err := s.plugins.Create(ctx, p); err != nil {
 		os.Remove(destPath)
@@ -219,7 +224,7 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		if dep.DependencyType != "required" || dep.ProjectID == "" {
 			continue
 		}
-		if _, err := s.installModrinthPlugin(ctx, inst, dep.ProjectID, true); err != nil {
+		if _, err := s.installModrinthPlugin(ctx, inst, dep.ProjectID, p.ID); err != nil {
 			// The primary plugin is already installed successfully; a
 			// dependency failure shouldn't undo that, just get logged so
 			// the operator can install it manually if actually needed.

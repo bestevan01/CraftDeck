@@ -313,6 +313,7 @@ export type Plugin = {
 	sha512?: string;
 	enabled: boolean;
 	installed_as_dependency: boolean;
+	parent_plugin_id?: string;
 	created_at: string;
 };
 

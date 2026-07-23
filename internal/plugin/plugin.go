@@ -25,6 +25,7 @@ type Plugin struct {
 	SHA512                string    `json:"sha512,omitempty"`
 	Enabled               bool      `json:"enabled"`
 	InstalledAsDependency bool      `json:"installed_as_dependency"`
+	ParentPluginID        string    `json:"parent_plugin_id,omitempty"`
 	CreatedAt             time.Time `json:"created_at"`
 }
 
@@ -47,13 +48,17 @@ func NewRepository(db *sql.DB) *Repository {
 
 func (r *Repository) Create(ctx context.Context, p *Plugin) error {
 	p.CreatedAt = time.Now().UTC()
+	var parentPluginID sql.NullString
+	if p.ParentPluginID != "" {
+		parentPluginID = sql.NullString{String: p.ParentPluginID, Valid: true}
+	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO plugins (
 			id, instance_id, source, modrinth_project_id, modrinth_version_id,
-			filename, sha512, enabled, installed_as_dependency, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			filename, sha512, enabled, installed_as_dependency, parent_plugin_id, created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		p.ID, p.InstanceID, p.Source, p.ModrinthProjectID, p.ModrinthVersionID,
-		p.Filename, p.SHA512, p.Enabled, p.InstalledAsDependency,
+		p.Filename, p.SHA512, p.Enabled, p.InstalledAsDependency, parentPluginID,
 		p.CreatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
@@ -65,7 +70,7 @@ func (r *Repository) Create(ctx context.Context, p *Plugin) error {
 func (r *Repository) ListByInstance(ctx context.Context, instanceID string) ([]*Plugin, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, instance_id, source, modrinth_project_id, modrinth_version_id,
-			filename, sha512, enabled, installed_as_dependency, created_at
+			filename, sha512, enabled, installed_as_dependency, parent_plugin_id, created_at
 		FROM plugins WHERE instance_id = ? ORDER BY created_at`, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("list plugins: %w", err)
@@ -89,7 +94,7 @@ func (r *Repository) ListByInstance(ctx context.Context, instanceID string) ([]*
 func (r *Repository) FindByModrinthProject(ctx context.Context, instanceID, projectID string) (*Plugin, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, instance_id, source, modrinth_project_id, modrinth_version_id,
-			filename, sha512, enabled, installed_as_dependency, created_at
+			filename, sha512, enabled, installed_as_dependency, parent_plugin_id, created_at
 		FROM plugins WHERE instance_id = ? AND modrinth_project_id = ?`, instanceID, projectID)
 	p, err := scanPlugin(row)
 	if err == sql.ErrNoRows {
@@ -101,7 +106,7 @@ func (r *Repository) FindByModrinthProject(ctx context.Context, instanceID, proj
 func (r *Repository) Get(ctx context.Context, id string) (*Plugin, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, instance_id, source, modrinth_project_id, modrinth_version_id,
-			filename, sha512, enabled, installed_as_dependency, created_at
+			filename, sha512, enabled, installed_as_dependency, parent_plugin_id, created_at
 		FROM plugins WHERE id = ?`, id)
 	return scanPlugin(row)
 }
@@ -133,10 +138,10 @@ type rowScanner interface {
 func scanPlugin(row rowScanner) (*Plugin, error) {
 	var p Plugin
 	var createdAt string
-	var modrinthProjectID, modrinthVersionID, sha512 sql.NullString
+	var modrinthProjectID, modrinthVersionID, sha512, parentPluginID sql.NullString
 	err := row.Scan(
 		&p.ID, &p.InstanceID, &p.Source, &modrinthProjectID, &modrinthVersionID,
-		&p.Filename, &sha512, &p.Enabled, &p.InstalledAsDependency, &createdAt,
+		&p.Filename, &sha512, &p.Enabled, &p.InstalledAsDependency, &parentPluginID, &createdAt,
 	)
 	if err != nil {
 		return nil, err
@@ -144,6 +149,7 @@ func scanPlugin(row rowScanner) (*Plugin, error) {
 	p.ModrinthProjectID = modrinthProjectID.String
 	p.ModrinthVersionID = modrinthVersionID.String
 	p.SHA512 = sha512.String
+	p.ParentPluginID = parentPluginID.String
 	p.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("parse created_at: %w", err)
