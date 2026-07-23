@@ -120,6 +120,20 @@ func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	edges, err := s.plugins.ListDependencyEdges(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Every parent a shared dependency has, not just the one ParentPluginID
+	// happened to record first -- see Plugin.DependentOf.
+	byDependency := make(map[string][]string)
+	for _, e := range edges {
+		byDependency[e.DependencyPluginID] = append(byDependency[e.DependencyPluginID], e.ParentPluginID)
+	}
+	for _, p := range list {
+		p.DependentOf = byDependency[p.ID]
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -160,16 +174,22 @@ func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 // Modrinth published (FR-6d), and recursively installs any required
 // dependency that isn't already present (FR-6c). parentID is the ID of the
 // plugin whose dependency resolution triggered this install, or "" for a
-// top-level install the operator requested directly -- recorded so the UI
-// can group auto-installed dependencies under the plugin that pulled them
-// in instead of showing an undifferentiated flat list. When a dependency
-// is shared by multiple plugins, it's grouped under whichever one
-// triggered its install first (FindByModrinthProject below short-circuits
-// any later ones).
+// top-level install the operator requested directly -- ParentPluginID
+// records whichever one happened to trigger the actual file install first,
+// but every caller (including this already-installed short-circuit) also
+// records the edge in plugin_dependencies, since a dependency shared by
+// several mods (Fabric API being needed by half a dozen Fabric mods is the
+// common case) needs all of those relationships visible, not just the
+// first one.
 func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Instance, projectID string, parentID string) (*plugin.Plugin, error) {
 	if existing, err := s.plugins.FindByModrinthProject(ctx, inst.ID, projectID); err != nil {
 		return nil, err
 	} else if existing != nil {
+		if parentID != "" {
+			if err := s.plugins.AddDependency(ctx, parentID, existing.ID); err != nil {
+				log.Printf("record dependency edge %s -> %s (continuing): %v", parentID, existing.ID, err)
+			}
+		}
 		return existing, nil // already installed -- common for shared dependencies
 	}
 
@@ -229,6 +249,11 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 	if err := s.plugins.Create(ctx, p); err != nil {
 		os.Remove(destPath)
 		return nil, err
+	}
+	if parentID != "" {
+		if err := s.plugins.AddDependency(ctx, parentID, p.ID); err != nil {
+			log.Printf("record dependency edge %s -> %s (continuing): %v", parentID, p.ID, err)
+		}
 	}
 
 	for _, dep := range version.Dependencies {

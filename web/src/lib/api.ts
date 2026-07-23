@@ -322,6 +322,9 @@ export type Plugin = {
 	enabled: boolean;
 	installed_as_dependency: boolean;
 	parent_plugin_id?: string;
+	// Every plugin ID that requires this one -- not just the first (see
+	// Plugin.DependentOf on the Go side).
+	dependent_of?: string[];
 	created_at: string;
 };
 

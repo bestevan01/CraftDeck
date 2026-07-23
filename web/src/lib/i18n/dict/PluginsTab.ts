@@ -7,8 +7,7 @@ export const messages = {
 		'pluginsTab.installedLabel': '설치된 {label}',
 		'pluginsTab.installedEmpty': '설치된 {label} 목록이 비어 있습니다.',
 		'pluginsTab.disabledTag': '(비활성화됨)',
-		'pluginsTab.dependencyOf': '↳ {parent}의 종속성',
-		'pluginsTab.otherDependenciesLabel': '기타 종속성',
+		'pluginsTab.sharedDependenciesLabel': '공유 종속성',
 		'pluginsTab.disable': '비활성화',
 		'pluginsTab.enable': '활성화',
 		'pluginsTab.delete': '삭제'
@@ -21,8 +20,7 @@ export const messages = {
 		'pluginsTab.installedLabel': 'Installed {label}',
 		'pluginsTab.installedEmpty': 'No {label} installed.',
 		'pluginsTab.disabledTag': '(disabled)',
-		'pluginsTab.dependencyOf': '↳ dependency of {parent}',
-		'pluginsTab.otherDependenciesLabel': 'Other dependencies',
+		'pluginsTab.sharedDependenciesLabel': 'Shared dependencies',
 		'pluginsTab.disable': 'Disable',
 		'pluginsTab.enable': 'Enable',
 		'pluginsTab.delete': 'Delete'

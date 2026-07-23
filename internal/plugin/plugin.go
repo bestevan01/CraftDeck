@@ -28,6 +28,14 @@ type Plugin struct {
 	InstalledAsDependency bool      `json:"installed_as_dependency"`
 	ParentPluginID        string    `json:"parent_plugin_id,omitempty"`
 	CreatedAt             time.Time `json:"created_at"`
+	// DependentOf lists every plugin ID that requires this one, per the
+	// plugin_dependencies table (0014_plugin_dependencies.sql) -- not a DB
+	// column, populated by handleListPlugins after the fact via
+	// ListDependencyEdges. ParentPluginID only ever records the first
+	// plugin that triggered this one's install; a shared dependency (Fabric
+	// API being needed by half a dozen mods is the common case) needs all
+	// of them, not just the first.
+	DependentOf []string `json:"dependent_of,omitempty"`
 }
 
 // DiskFilename is the plugin's actual filename on disk right now --
@@ -124,6 +132,50 @@ func (r *Repository) SetEnabled(ctx context.Context, id string, enabled bool) er
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM plugins WHERE id = ?`, id)
 	return err
+}
+
+// AddDependency records that parentID requires dependencyID, in addition to
+// whatever ParentPluginID already says (which only ever holds the first
+// plugin that triggered dependencyID's install). Idempotent -- installing
+// the same mod twice, or two mods that both depend on the same shared
+// dependency, must not fail or duplicate the edge.
+func (r *Repository) AddDependency(ctx context.Context, parentID, dependencyID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO plugin_dependencies (parent_plugin_id, dependency_plugin_id)
+		VALUES (?, ?)`, parentID, dependencyID)
+	return err
+}
+
+// DependencyEdge is one row of plugin_dependencies.
+type DependencyEdge struct {
+	ParentPluginID     string
+	DependencyPluginID string
+}
+
+// ListDependencyEdges returns every (parent, dependency) edge among
+// instanceID's plugins -- joined through plugins to scope by instance,
+// since plugin_dependencies itself has no instance_id column (both sides of
+// an edge always belong to the same instance, so joining on either works).
+func (r *Repository) ListDependencyEdges(ctx context.Context, instanceID string) ([]DependencyEdge, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT pd.parent_plugin_id, pd.dependency_plugin_id
+		FROM plugin_dependencies pd
+		JOIN plugins p ON p.id = pd.dependency_plugin_id
+		WHERE p.instance_id = ?`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list plugin dependency edges: %w", err)
+	}
+	defer rows.Close()
+
+	var out []DependencyEdge
+	for rows.Next() {
+		var e DependencyEdge
+		if err := rows.Scan(&e.ParentPluginID, &e.DependencyPluginID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // DeleteByInstance removes every plugin/mod record for instanceID --

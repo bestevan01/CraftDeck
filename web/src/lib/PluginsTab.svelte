@@ -28,32 +28,38 @@
 		onDeletePlugin: (p: Plugin) => void;
 	} = $props();
 
-	// 검색으로 직접 설치한(또는 업로드한) 모드를 부모로, 그때 같이 딸려온
-	// 종속성은 그 아래 들여쓰기로 묶어서 보여준다. installed_as_dependency
-	// 기준으로 최상단/종속성을 나누고(parent_plugin_id 기준이 아님) --
-	// parent_plugin_id가 이 마이그레이션 이전에 설치된 레거시 종속성에는
-	// 없기 때문에, 그것까지 기타 종속성으로 잡아내려면 이 기준이어야 한다.
-	// 부모가 나중에 삭제된 경우(0012_plugin_parent.sql, ON DELETE SET
-	// NULL)도 마찬가지로 parent_plugin_id만 비고 종속성 자체는 남는다.
+	// 검색으로 직접 설치한(또는 업로드한) 모드만 상단에 평평하게 나열하고,
+	// 자동으로 딸려온 종속성은 "공유 종속성" 섹션에 한 번씩만 모아서
+	// 보여준다. 예전처럼 특정 부모 밑에 중첩시키지 않는 이유: Fabric API
+	// 같은 종속성은 설치된 모드 여러 개가 동시에 필요로 하는 경우가
+	// 흔한데, parent_plugin_id는 그중 딱 하나(제일 먼저 설치를 유발한
+	// 모드)만 기록할 수 있어서 나머지 모드들은 이 종속성이 자기 때문에
+	// 깔려 있다는 사실 자체를 알 방법이 없었다 (확인된 버그). 이제는
+	// plugin_dependencies 조인 테이블에서 나온 dependent_of(모든 부모
+	// id)를 우선 쓰고, 이 마이그레이션 이전에 설치되어 dependent_of가
+	// 비어 있는 레거시 종속성만 parent_plugin_id로 대체한다.
 	let topLevelPlugins = $derived(plugins.filter((p) => !p.installed_as_dependency));
-	let orphanDependencies = $derived(
-		plugins.filter(
-			(p) =>
-				p.installed_as_dependency &&
-				(!p.parent_plugin_id || !plugins.some((x) => x.id === p.parent_plugin_id))
-		)
-	);
-	function childrenOf(parentId: string) {
-		return plugins.filter((p) => p.parent_plugin_id === parentId);
+	let dependencyPlugins = $derived(plugins.filter((p) => p.installed_as_dependency));
+
+	function parentNames(p: Plugin): string[] {
+		const parentIDs =
+			p.dependent_of && p.dependent_of.length > 0
+				? p.dependent_of
+				: p.parent_plugin_id
+					? [p.parent_plugin_id]
+					: [];
+		return parentIDs
+			.map((parentID) => plugins.find((x) => x.id === parentID))
+			.filter((x): x is Plugin => !!x)
+			.map((x) => x.title || x.filename);
 	}
 </script>
 
-{#snippet pluginRow(p: Plugin, dependencyOfLabel?: string)}
+{#snippet pluginRow(p: Plugin)}
 	<div class="border-border flex items-center justify-between rounded-md border px-2 py-1.5 text-xs">
 		<span title={p.filename}>
 			{p.title || p.filename}
 			{#if !p.enabled}<span class="text-muted-foreground">{$t('pluginsTab.disabledTag')}</span>{/if}
-			{#if dependencyOfLabel}<span class="text-muted-foreground">{dependencyOfLabel}</span>{/if}
 		</span>
 		<div class="flex shrink-0 gap-1.5">
 			<button
@@ -116,25 +122,27 @@
 		{:else}
 			<div class="min-h-0 flex-1 space-y-2.5 overflow-y-auto">
 				{#each topLevelPlugins as p (p.id)}
-					<div>
-						{@render pluginRow(p)}
-						{#if childrenOf(p.id).length > 0}
-							<div class="border-border mt-1.5 ml-4 space-y-1.5 border-l pl-2.5">
-								{#each childrenOf(p.id) as dep (dep.id)}
-									{@render pluginRow(dep, $t('pluginsTab.dependencyOf', { parent: p.title || p.filename }))}
-								{/each}
-							</div>
-						{/if}
-					</div>
+					{@render pluginRow(p)}
 				{/each}
-				{#if orphanDependencies.length > 0}
-					<div>
+				{#if dependencyPlugins.length > 0}
+					<div class="border-border mt-1 border-t pt-2.5">
 						<span class="text-muted-foreground mb-1.5 block text-xs"
-							>{$t('pluginsTab.otherDependenciesLabel')}</span
+							>{$t('pluginsTab.sharedDependenciesLabel')}</span
 						>
 						<div class="space-y-1.5">
-							{#each orphanDependencies as dep (dep.id)}
-								{@render pluginRow(dep)}
+							{#each dependencyPlugins as dep (dep.id)}
+								<div>
+									{@render pluginRow(dep)}
+									{#if parentNames(dep).length > 0}
+										<div class="mt-1 flex flex-wrap gap-1">
+											{#each parentNames(dep) as name (name)}
+												<span class="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px]"
+													>{name}</span
+												>
+											{/each}
+										</div>
+									{/if}
+								</div>
 							{/each}
 						</div>
 					</div>
