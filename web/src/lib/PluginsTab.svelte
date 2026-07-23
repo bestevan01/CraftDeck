@@ -29,13 +29,19 @@
 	} = $props();
 
 	// 검색으로 직접 설치한(또는 업로드한) 모드를 부모로, 그때 같이 딸려온
-	// 종속성은 그 아래 들여쓰기로 묶어서 보여준다 -- 부모가 나중에
-	// 삭제되면(0012_plugin_parent.sql, ON DELETE SET NULL) 종속성 자체는
-	// 안 지워지고 parent_plugin_id만 비므로, 그런 것들은 "기타 종속성"으로
-	// 따로 모은다.
-	let topLevelPlugins = $derived(plugins.filter((p) => !p.parent_plugin_id));
+	// 종속성은 그 아래 들여쓰기로 묶어서 보여준다. installed_as_dependency
+	// 기준으로 최상단/종속성을 나누고(parent_plugin_id 기준이 아님) --
+	// parent_plugin_id가 이 마이그레이션 이전에 설치된 레거시 종속성에는
+	// 없기 때문에, 그것까지 기타 종속성으로 잡아내려면 이 기준이어야 한다.
+	// 부모가 나중에 삭제된 경우(0012_plugin_parent.sql, ON DELETE SET
+	// NULL)도 마찬가지로 parent_plugin_id만 비고 종속성 자체는 남는다.
+	let topLevelPlugins = $derived(plugins.filter((p) => !p.installed_as_dependency));
 	let orphanDependencies = $derived(
-		plugins.filter((p) => p.parent_plugin_id && !plugins.some((x) => x.id === p.parent_plugin_id))
+		plugins.filter(
+			(p) =>
+				p.installed_as_dependency &&
+				(!p.parent_plugin_id || !plugins.some((x) => x.id === p.parent_plugin_id))
+		)
 	);
 	function childrenOf(parentId: string) {
 		return plugins.filter((p) => p.parent_plugin_id === parentId);
