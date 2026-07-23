@@ -103,8 +103,10 @@
 		{/if}
 	</div>
 
-	<div class="border-border bg-card max-h-[26rem] overflow-y-auto rounded-lg border p-4 lg:w-1/2">
-		<span class="text-muted-foreground mb-1 block text-xs"
+	<div
+		class="border-border bg-card flex flex-col rounded-lg border p-4 lg:w-1/2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]"
+	>
+		<span class="text-muted-foreground mb-1 block shrink-0 text-xs"
 			>{$t('pluginsTab.installedLabel', { label: pluginTabLabel(inst.loader) })}</span
 		>
 		{#if plugins.length === 0}
@@ -112,7 +114,7 @@
 				{$t('pluginsTab.installedEmpty', { label: pluginTabLabel(inst.loader) })}
 			</p>
 		{:else}
-			<div class="space-y-2.5">
+			<div class="space-y-2.5 overflow-y-auto">
 				{#each topLevelPlugins as p (p.id)}
 					<div>
 						{@render pluginRow(p)}
