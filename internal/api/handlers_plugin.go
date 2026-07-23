@@ -412,6 +412,13 @@ func (s *Server) handleSetPluginEnabled(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, p)
 }
 
+// handleDeletePlugin removes the requested plugin, plus -- transitively --
+// any dependency that would be left orphaned by it (no other installed mod
+// still needs it). A dependency that's shared with at least one surviving
+// mod is left alone; only the now-stale edge to the deleted parent goes
+// away (ON DELETE CASCADE on plugin_dependencies handles that automatically
+// once the parent row is gone). See deletePluginCascade for the actual
+// orphan computation.
 func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := r.PathValue("id")
@@ -428,16 +435,83 @@ func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := filepath.Join(inst.WorkDir, pluginsDirName(inst.Loader), p.DiskFilename())
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	cascadeIDs, err := s.deletePluginCascade(ctx, pluginID)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.plugins.Delete(ctx, pluginID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	for _, delID := range cascadeIDs {
+		target := p
+		if delID != pluginID {
+			target, err = s.plugins.Get(ctx, delID)
+			if err != nil {
+				continue // already gone (e.g. a concurrent delete) -- nothing left to clean up
+			}
+		}
+		path := filepath.Join(inst.WorkDir, pluginsDirName(inst.Loader), target.DiskFilename())
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := s.plugins.Delete(ctx, delID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deletePluginCascade returns id plus every dependency that installing it
+// (directly or transitively) is solely responsible for -- computed from a
+// single snapshot of the instance's whole dependency graph so the orphan
+// check for a grandchild sees its parent as already-being-deleted even
+// though nothing has actually been deleted from the DB yet (deletion order
+// doesn't matter; this just decides the membership).
+func (s *Server) deletePluginCascade(ctx context.Context, id string) ([]string, error) {
+	p, err := s.plugins.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	edges, err := s.plugins.ListDependencyEdges(ctx, p.InstanceID)
+	if err != nil {
+		return nil, err
+	}
+
+	parentsOf := make(map[string][]string)
+	childrenOf := make(map[string][]string)
+	for _, e := range edges {
+		parentsOf[e.DependencyPluginID] = append(parentsOf[e.DependencyPluginID], e.ParentPluginID)
+		childrenOf[e.ParentPluginID] = append(childrenOf[e.ParentPluginID], e.DependencyPluginID)
+	}
+
+	toDelete := map[string]bool{id: true}
+	for changed := true; changed; {
+		changed = false
+		for parentID := range toDelete {
+			for _, childID := range childrenOf[parentID] {
+				if toDelete[childID] {
+					continue
+				}
+				stillNeeded := false
+				for _, parentOfChild := range parentsOf[childID] {
+					if !toDelete[parentOfChild] {
+						stillNeeded = true
+						break
+					}
+				}
+				if !stillNeeded {
+					toDelete[childID] = true
+					changed = true
+				}
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(toDelete))
+	for pluginID := range toDelete {
+		ids = append(ids, pluginID)
+	}
+	return ids, nil
 }
 
 // chownInstanceFile hands ownership of a newly written or edited file
