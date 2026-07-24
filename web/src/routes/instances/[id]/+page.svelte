@@ -83,6 +83,15 @@
 	let logEl: HTMLDivElement;
 	let ws: WebSocket | null = null;
 	let wsStatus = $state<'connecting' | 'open' | 'closed'>('connecting');
+	// Set right before the deliberate ws.close() in onDestroy, so onclose
+	// below can tell "we're leaving this page" apart from "the connection
+	// dropped out from under us" and only auto-reconnect for the latter.
+	let consoleUnmounting = false;
+	let consoleReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	// Resets to 1s after every successful open -- a real outage backs off
+	// up to 30s instead of hammering the server, but a one-off blip
+	// reconnects fast.
+	let consoleReconnectDelayMs = 1000;
 
 	// FR-17 quick-command panel state
 	let playerName = $state('');
@@ -307,11 +316,27 @@
 	}
 
 	function connectConsole() {
+		clearTimeout(consoleReconnectTimer);
 		ws = new WebSocket(api.consoleURL(id));
 		wsStatus = 'connecting';
-		ws.onopen = () => (wsStatus = 'open');
-		ws.onclose = () => (wsStatus = 'closed');
-		ws.onerror = () => (wsStatus = 'closed');
+		ws.onopen = () => {
+			wsStatus = 'open';
+			consoleReconnectDelayMs = 1000;
+		};
+		ws.onclose = () => {
+			wsStatus = 'closed';
+			if (consoleUnmounting) return;
+			// The backend now pings every 20s (see handleConsoleWebSocket) so
+			// a real idle-timeout drop shouldn't happen anymore, but this
+			// covers whatever still can -- the daemon restarting for an
+			// update, a network blip, etc. -- without the operator having to
+			// notice and refresh the page themselves (confirmed: that used
+			// to be the only way back, even though the instance itself and
+			// its console were both still perfectly fine).
+			consoleReconnectTimer = setTimeout(connectConsole, consoleReconnectDelayMs);
+			consoleReconnectDelayMs = Math.min(consoleReconnectDelayMs * 2, 30000);
+		};
+		ws.onerror = () => ws?.close();
 		ws.onmessage = (event) => {
 			const frame = JSON.parse(event.data);
 			if (frame.type === 'log') {
@@ -1265,7 +1290,11 @@
 			clearInterval(banOpPoll);
 		};
 	});
-	onDestroy(() => ws?.close());
+	onDestroy(() => {
+		consoleUnmounting = true;
+		clearTimeout(consoleReconnectTimer);
+		ws?.close();
+	});
 
 	async function start() {
 		await api.startInstance(id);

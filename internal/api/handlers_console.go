@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"os/exec"
+	"time"
 
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -54,6 +55,33 @@ func (s *Server) handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer cmd.Wait() //nolint:errcheck // killed via ctx cancellation on return
+
+	// Nothing here ever wrote to the socket while the operator just sat
+	// watching an idle console (no new log lines, no commands), so a
+	// connection sitting behind any idle-timing-out intermediary -- a
+	// reverse proxy, a home router's NAT table, a mobile carrier -- got
+	// silently dropped with nothing on either side noticing (confirmed:
+	// exactly this, consistently around 90s of inactivity, with the
+	// frontend never reconnecting on its own afterward). A WS ping frame
+	// every 20s keeps real traffic flowing on the socket so those
+	// intermediaries see it as active; nhooyr's Ping already handles the
+	// pong reply/wait internally, and a failed ping (the connection is
+	// actually gone) cancels ctx so both goroutines below exit cleanly.
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.Ping(ctx); err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 
 	// Stream journal lines to the client.
 	go func() {
