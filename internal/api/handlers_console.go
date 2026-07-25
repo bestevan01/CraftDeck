@@ -128,7 +128,8 @@ type consoleHistoryEntry struct {
 }
 
 // handleConsoleHistory serves the console's "scroll up for more" older
-// history from gamelog's on-disk per-instance capture (see
+// history by reading straight from the instance's own Log4j2 log files
+// (logs/latest.log plus rotated logs/<date>-<n>.log.gz -- see
 // internal/gamelog), independent of both journald's own retention and of
 // the WebSocket handler's live/recent-50 stream above. before defaults to
 // now (the very first "load more" call) and is otherwise the `at` of the

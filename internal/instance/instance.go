@@ -47,11 +47,13 @@ type Instance struct {
 	// that choice on every daemon restart.
 	ProxyOptOut bool `json:"proxy_opt_out"`
 
-	// LogStorage* control internal/gamelog's per-instance on-disk console
-	// capture (independent of journald's own system-wide retention) --
-	// whether it's on at all, and how accumulated log files get cleaned up.
-	// LogRetentionMode is "unlimited" (never delete), "age" (delete files
-	// older than LogRetentionDays), or "size" (delete oldest files once
+	// LogStorage* control internal/gamelog's retention policy over this
+	// instance's own Log4j2 log files (WorkDir/logs/*.log.gz) -- every
+	// loader writes these on its own regardless of this setting, but none
+	// of them ever clean up after themselves. LogStorageEnabled is whether
+	// CraftDeck's retention enforcement is active at all; LogRetentionMode
+	// is "unlimited" (never delete), "age" (delete rotated files older
+	// than LogRetentionDays), or "size" (delete oldest rotated files once
 	// total size exceeds LogRetentionMaxMB).
 	LogStorageEnabled bool   `json:"log_storage_enabled"`
 	LogRetentionMode  string `json:"log_retention_mode"`

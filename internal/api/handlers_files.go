@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -114,7 +115,11 @@ func looksLikeText(data []byte) bool {
 }
 
 // handleGetFileContent reads one file's content as text, for the file
-// manager's double-click-to-edit action.
+// manager's double-click-to-edit action. A .gz path (the rotated Log4j2
+// server logs CraftDeck's own log-retention settings now manage -- see
+// internal/gamelog -- are the main real-world case) is decompressed
+// on the fly, so an operator can just open an old log straight from the
+// file manager instead of downloading and extracting it by hand first.
 func (s *Server) handleGetFileContent(w http.ResponseWriter, r *http.Request) {
 	inst, err := s.instances.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -131,13 +136,43 @@ func (s *Server) handleGetFileContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
-	if info.Size() > maxEditableFileBytes {
-		http.Error(w, "file too large to edit here -- download it instead", http.StatusRequestEntityTooLarge)
-		return
+
+	var content []byte
+	if strings.HasSuffix(fullPath, ".gz") {
+		f, err := os.Open(fullPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			http.Error(w, "not a valid gzip file", http.StatusUnsupportedMediaType)
+			return
+		}
+		defer gz.Close()
+		// Checked against the *decompressed* size, not the .gz file's own
+		// (usually much smaller) size on disk -- a small gzip can still
+		// expand into something far past what's sane to edit in a browser
+		// textarea, so the cap has to apply after decompression, not before.
+		content, err = io.ReadAll(io.LimitReader(gz, maxEditableFileBytes+1))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to decompress: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if info.Size() > maxEditableFileBytes {
+			http.Error(w, "file too large to edit here -- download it instead", http.StatusRequestEntityTooLarge)
+			return
+		}
+		content, err = os.ReadFile(fullPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
-	content, err := os.ReadFile(fullPath)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if len(content) > maxEditableFileBytes {
+		http.Error(w, "file too large to view here -- download it instead", http.StatusRequestEntityTooLarge)
 		return
 	}
 	if !looksLikeText(content) {
@@ -165,6 +200,14 @@ func (s *Server) handleSetFileContent(w http.ResponseWriter, r *http.Request) {
 	fullPath, err := resolveInstancePath(inst, r.URL.Query().Get("path"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.HasSuffix(fullPath, ".gz") {
+		// handleGetFileContent decompresses a .gz transparently for viewing,
+		// but writing plain text back over it would just produce a file
+		// named .gz that isn't actually valid gzip anymore -- refuse rather
+		// than silently corrupt it.
+		http.Error(w, "compressed files can't be edited here -- download it instead", http.StatusUnsupportedMediaType)
 		return
 	}
 	if info, err := os.Stat(fullPath); err != nil || info.IsDir() {

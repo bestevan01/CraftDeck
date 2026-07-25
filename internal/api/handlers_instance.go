@@ -588,12 +588,12 @@ type updateInstanceRequest struct {
 	// pointer). Only honored for a server that isn't sitting behind the
 	// proxy -- see the eligibility check below.
 	GamePort int `json:"game_port"`
-	// Log* control internal/gamelog's per-instance on-disk console capture
-	// -- see Instance.LogStorage* doc comment. Unlike GamePort these are
-	// always applied (the frontend always submits its current values
-	// alongside CPU/memory, same as those two), and take effect
-	// immediately if the instance is running rather than waiting for a
-	// restart (see the StartCapturing call below).
+	// Log* control internal/gamelog's retention policy over the server's
+	// own Log4j2 log files (see Instance.LogStorage* doc comment). Unlike
+	// GamePort these are always applied (the frontend always submits its
+	// current values alongside CPU/memory, same as those two), and are
+	// enforced immediately (see the EnforceRetention call below) rather
+	// than waiting for a restart.
 	LogStorageEnabled bool   `json:"log_storage_enabled"`
 	LogRetentionMode  string `json:"log_retention_mode"`
 	LogRetentionDays  int    `json:"log_retention_days"`
@@ -707,19 +707,14 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Applies a log-settings change immediately rather than making the
-	// operator restart the whole Minecraft server just to turn capture on/
-	// off or change its retention -- StartCapturing is a no-op-safe
-	// replace either way (see its doc comment), and does nothing at all if
-	// the instance isn't actually running (nothing to capture from yet).
-	if updated.Status == instance.StatusRunning || updated.Status == instance.StatusStarting {
-		s.gamelogMgr.StartCapturing(updated.ID, "craftdeck-instance-"+updated.ID, filepath.Join(updated.WorkDir, "logs"), gamelog.Settings{
-			Enabled:        updated.LogStorageEnabled,
-			RetentionMode:  updated.LogRetentionMode,
-			RetentionDays:  updated.LogRetentionDays,
-			RetentionMaxMB: updated.LogRetentionMaxMB,
-		})
-	}
+	// Applies a stricter retention setting immediately rather than waiting
+	// for the next daily sweep (main.go) or instance restart to catch up.
+	gamelog.EnforceRetention(filepath.Join(updated.WorkDir, "logs"), gamelog.Settings{
+		Enabled:        updated.LogStorageEnabled,
+		RetentionMode:  updated.LogRetentionMode,
+		RetentionDays:  updated.LogRetentionDays,
+		RetentionMaxMB: updated.LogRetentionMaxMB,
+	})
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -773,7 +768,6 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 	// Pi that never actually got cleaned up despite being "deleted" here.
 	_ = s.supervisor.Stop(ctx, id) // best-effort: fine if it wasn't running
 	s.rconMgr.StopMaintaining(id)
-	s.gamelogMgr.StopCapturing(id)
 	_ = process.RemoveInstanceUser(ctx, id)
 
 	if inst.Kind == instance.KindServer {
@@ -920,7 +914,12 @@ func (s *Server) startInstanceCore(ctx context.Context, inst *instance.Instance)
 	if err := s.ReconcileGamePorts(ctx); err != nil {
 		log.Printf("reconcile game ports after starting %s: %v", inst.ID, err)
 	}
-	s.gamelogMgr.StartCapturing(inst.ID, "craftdeck-instance-"+inst.ID, filepath.Join(inst.WorkDir, "logs"), gamelog.Settings{
+	// Sweeps whatever the *previous* run's Log4j2 rotation left behind --
+	// the daily background sweep (main.go) covers the common case of a
+	// long-running instance rotating mid-session, but a fresh start is a
+	// free, cheap moment to also catch up on anything that piled up while
+	// the instance was stopped.
+	gamelog.EnforceRetention(filepath.Join(inst.WorkDir, "logs"), gamelog.Settings{
 		Enabled:        inst.LogStorageEnabled,
 		RetentionMode:  inst.LogRetentionMode,
 		RetentionDays:  inst.LogRetentionDays,
@@ -998,8 +997,6 @@ func (s *Server) stopInstanceCore(_ context.Context, inst *instance.Instance) er
 	status := instance.StatusStopped
 	if active, _ := s.supervisor.IsActive(ctx, inst.ID); active {
 		status = instance.StatusRunning
-	} else {
-		s.gamelogMgr.StopCapturing(inst.ID)
 	}
 	if err := s.instances.UpdateStatus(ctx, inst.ID, status); err != nil {
 		return err

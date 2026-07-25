@@ -111,11 +111,10 @@ func (r *Repository) SetProxyOptOut(ctx context.Context, id string, optOut bool)
 	return err
 }
 
-// UpdateLogSettings changes the operator-facing gamelog capture controls
-// (see Instance.LogStorage* doc comment). Callers restart the instance's
-// capture goroutine (gamelog.Manager.StartCapturing) right after this so a
-// toggle/mode change takes effect immediately rather than needing a
-// server restart.
+// UpdateLogSettings changes the operator-facing gamelog retention controls
+// (see Instance.LogStorage* doc comment). Callers run
+// gamelog.EnforceRetention right after this so a stricter setting is
+// applied immediately rather than waiting for the next daily sweep.
 func (r *Repository) UpdateLogSettings(ctx context.Context, id string, enabled bool, mode string, days, maxMB int) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE instances

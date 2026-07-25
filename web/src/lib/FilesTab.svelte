@@ -77,6 +77,11 @@
 	} = $props();
 
 	let pressedBackdrop = false;
+	// .gz is opened decompressed for viewing (see handleGetFileContent) but
+	// writing plain text back over it wouldn't be valid gzip anymore -- the
+	// backend already refuses the save, this just avoids offering a button
+	// that's guaranteed to fail.
+	let readOnlyFile = $derived(editingFile?.endsWith('.gz') ?? false);
 </script>
 
 <div class="border-border bg-card rounded-lg border p-4">
@@ -213,28 +218,36 @@
 			{#if loadingFileContent}
 				<p class="text-muted-foreground text-xs">{$t('filesTab.loading')}</p>
 			{:else}
+				{#if readOnlyFile}
+					<p class="text-muted-foreground mb-2 text-xs">{$t('filesTab.gzReadOnly')}</p>
+				{/if}
 				<textarea
 					bind:value={editingContent}
 					oninput={() => (fileContentSaved = false)}
+					readonly={readOnlyFile}
 					rows="20"
 					spellcheck="false"
-					class="border-input bg-background w-full flex-1 rounded-md border p-2 font-mono text-xs"
+					class="border-input bg-background w-full flex-1 rounded-md border p-2 font-mono text-xs {readOnlyFile
+						? 'opacity-75'
+						: ''}"
 				></textarea>
 				{#if fileContentError}
 					<p class="text-destructive mt-2 text-xs">{fileContentError}</p>
 				{/if}
-				<div class="mt-2 flex items-center gap-2">
-					<button
-						class="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
-						disabled={savingFileContent}
-						onclick={onSaveFileContent}
-					>
-						{savingFileContent ? $t('filesTab.saving') : $t('filesTab.save')}
-					</button>
-					{#if fileContentSaved}
-						<span class="text-muted-foreground text-xs">{$t('filesTab.savedRestartRequired')}</span>
-					{/if}
-				</div>
+				{#if !readOnlyFile}
+					<div class="mt-2 flex items-center gap-2">
+						<button
+							class="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+							disabled={savingFileContent}
+							onclick={onSaveFileContent}
+						>
+							{savingFileContent ? $t('filesTab.saving') : $t('filesTab.save')}
+						</button>
+						{#if fileContentSaved}
+							<span class="text-muted-foreground text-xs">{$t('filesTab.savedRestartRequired')}</span>
+						{/if}
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</div>

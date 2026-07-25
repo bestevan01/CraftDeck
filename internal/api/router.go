@@ -12,7 +12,6 @@ import (
 	"craftdeck/internal/auth"
 	"craftdeck/internal/backup"
 	"craftdeck/internal/ddns"
-	"craftdeck/internal/gamelog"
 	"craftdeck/internal/hardware"
 	"craftdeck/internal/instance"
 	"craftdeck/internal/network"
@@ -61,11 +60,6 @@ type Server struct {
 	// updateSettings backs the update channel (stable/beta/canary) + check
 	// frequency settings (internal/update) -- see handlers_system.go.
 	updateSettings *update.Repository
-
-	// gamelogMgr runs each running instance's on-disk console-history
-	// capture (internal/gamelog), started/stopped alongside the instance
-	// itself in startInstanceCore/stopInstanceCore.
-	gamelogMgr *gamelog.Manager
 }
 
 func NewServer(
@@ -86,7 +80,6 @@ func NewServer(
 	hardwareSettings *hardware.Repository,
 	benchmarkRunner *hardware.BenchmarkRunner,
 	updateSettings *update.Repository,
-	gamelogMgr *gamelog.Manager,
 ) *Server {
 	return &Server{
 		instances:        instances,
@@ -106,7 +99,6 @@ func NewServer(
 		hardwareSettings: hardwareSettings,
 		benchmarkRunner:  benchmarkRunner,
 		updateSettings:   updateSettings,
-		gamelogMgr:       gamelogMgr,
 	}
 }
 

@@ -16,7 +16,8 @@ export const messages = {
 		'filesTab.savedRestartRequired': '저장됨 · 재시작해야 반영됩니다',
 		'filesTab.file': '파일',
 		'filesTab.openErrorTitle': '{name}을(를) 열 수 없습니다',
-		'filesTab.close': '닫기'
+		'filesTab.close': '닫기',
+		'filesTab.gzReadOnly': '압축 파일(.gz)은 내용만 볼 수 있고 여기서 편집/저장할 수는 없습니다.'
 	},
 	en: {
 		'filesTab.title': 'Files',
@@ -35,6 +36,7 @@ export const messages = {
 		'filesTab.savedRestartRequired': 'Saved · restart required to take effect',
 		'filesTab.file': 'File',
 		'filesTab.openErrorTitle': 'Could not open {name}',
-		'filesTab.close': 'Close'
+		'filesTab.close': 'Close',
+		'filesTab.gzReadOnly': "Compressed (.gz) files are view-only here -- can't be edited or saved."
 	}
 };

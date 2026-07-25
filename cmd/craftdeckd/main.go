@@ -75,7 +75,6 @@ func run() error {
 	hardwareSettings := hardware.NewRepository(database)
 	benchmarkRunner := hardware.NewBenchmarkRunner()
 	updateSettings := update.NewRepository(database)
-	gamelogMgr := gamelog.NewManager()
 	masterKey, err := secrets.LoadOrCreateMasterKey(cfg.MasterKeyPath)
 	if err != nil {
 		return fmt.Errorf("load/create master key: %w", err)
@@ -85,7 +84,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("determine web UI port from %q: %w", cfg.ListenAddr, err)
 	}
-	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey, hardwareSettings, benchmarkRunner, updateSettings, gamelogMgr)
+	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey, hardwareSettings, benchmarkRunner, updateSettings)
 	// FR-28/30: wired up after apiServer exists (ddnsManager is built first
 	// since api.NewServer takes it as a constructor argument) -- see
 	// ddns.Manager.SetMainDomainSync's doc comment.
@@ -98,9 +97,16 @@ func run() error {
 	// RCON connection forever (confirmed: this is exactly what happened
 	// after a deploy mid-session -- the game server kept running but
 	// commands stopped working until the user manually restarted it).
-	if err := reconcileInstances(context.Background(), instances, supervisor, rconMgr, gamelogMgr); err != nil {
+	if err := reconcileInstances(context.Background(), instances, supervisor, rconMgr); err != nil {
 		log.Printf("instance reconciliation failed (continuing anyway): %v", err)
 	}
+
+	// gamelog.EnforceRetention only runs at instance start/settings-change
+	// (see handlers_instance.go) otherwise, which misses a long-running
+	// instance that keeps rotating logs mid-session without ever
+	// restarting -- this catches that by sweeping every instance once a
+	// day regardless of what else is happening to it.
+	go dailyLogRetentionSweep(instances)
 
 	// Active Cooler detection spins the fan up as part of the test (see
 	// hardware.DetectActiveCooler), so it must only ever run once per
@@ -208,7 +214,7 @@ func run() error {
 // brings both instances.status and the RCON manager back in sync with
 // reality, regardless of what was last written to the DB before this
 // process started.
-func reconcileInstances(ctx context.Context, instances *instance.Repository, supervisor *process.Supervisor, rconMgr *rcon.Manager, gamelogMgr *gamelog.Manager) error {
+func reconcileInstances(ctx context.Context, instances *instance.Repository, supervisor *process.Supervisor, rconMgr *rcon.Manager) error {
 	list, err := instances.List(ctx)
 	if err != nil {
 		return err
@@ -230,23 +236,40 @@ func reconcileInstances(ctx context.Context, instances *instance.Repository, sup
 			if inst.Status != instance.StatusRunning {
 				_ = instances.UpdateStatus(ctx, inst.ID, instance.StatusRunning)
 			}
-			// Same reasoning as the RCON manager just above: a fresh
-			// process starts with an empty gamelog.Manager too, so an
-			// instance that was already running before this restart (e.g.
-			// craftdeckd self-updating mid-session) would otherwise lose
-			// console history capture for good until someone happened to
-			// restart that instance too.
-			gamelogMgr.StartCapturing(inst.ID, "craftdeck-instance-"+inst.ID, filepath.Join(inst.WorkDir, "logs"), gamelog.Settings{
-				Enabled:        inst.LogStorageEnabled,
-				RetentionMode:  inst.LogRetentionMode,
-				RetentionDays:  inst.LogRetentionDays,
-				RetentionMaxMB: inst.LogRetentionMaxMB,
-			})
 		} else if inst.Status == instance.StatusRunning || inst.Status == instance.StatusStarting {
 			_ = instances.UpdateStatus(ctx, inst.ID, instance.StatusStopped)
 		}
 	}
 	return nil
+}
+
+// dailyLogRetentionSweep runs gamelog.EnforceRetention against every
+// instance once a day for as long as craftdeckd keeps running -- see the
+// call site's comment for why the start/settings-change triggers alone
+// aren't enough. Runs once immediately on startup too (covers a Pi that's
+// rebooted daily and would otherwise almost never hit the 24h mark).
+func dailyLogRetentionSweep(instances *instance.Repository) {
+	sweep := func() {
+		list, err := instances.List(context.Background())
+		if err != nil {
+			log.Printf("daily log retention sweep: list instances: %v", err)
+			return
+		}
+		for _, inst := range list {
+			gamelog.EnforceRetention(filepath.Join(inst.WorkDir, "logs"), gamelog.Settings{
+				Enabled:        inst.LogStorageEnabled,
+				RetentionMode:  inst.LogRetentionMode,
+				RetentionDays:  inst.LogRetentionDays,
+				RetentionMaxMB: inst.LogRetentionMaxMB,
+			})
+		}
+	}
+	sweep()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
+	}
 }
 
 // portFromAddr extracts the numeric port from a listen address like

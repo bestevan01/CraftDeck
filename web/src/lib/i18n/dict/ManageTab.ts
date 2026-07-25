@@ -21,8 +21,8 @@ export const messages = {
 		'manageTab.serverSettings.cpuAllocLabel': 'CPU 할당',
 		'manageTab.serverSettings.gamePortLabel': '접속 포트',
 		'manageTab.serverSettings.gamePortLockedNote': '프록시에 등록된 서버는 포트를 변경할 수 없습니다. 독립 노출로 전환하면 변경할 수 있습니다.',
-		'manageTab.serverSettings.logStorageLabel': '콘솔 로그 저장',
-		'manageTab.serverSettings.logStorageHint': '서버가 실행되는 동안 콘솔 로그 전체를 디스크에 저장해, 콘솔에서 위로 스크롤하면 그 이전 기록도 불러올 수 있게 합니다.',
+		'manageTab.serverSettings.logStorageLabel': '오래된 로그 자동 정리',
+		'manageTab.serverSettings.logStorageHint': '구동기가 logs/ 폴더에 남기는 로그는 항상 쌓이고 자동으로 지워지지 않습니다. 여기서 켜면 CraftDeck이 아래 방식대로 오래된 로그 파일을 대신 정리해줍니다.',
 		'manageTab.serverSettings.logRetentionModeLabel': '보관 방식',
 		'manageTab.serverSettings.logRetentionUnlimited': '무제한',
 		'manageTab.serverSettings.logRetentionAge': '날짜별 밀어내기',
@@ -119,9 +119,9 @@ export const messages = {
 		'manageTab.serverSettings.gamePortLabel': 'Connection port',
 		'manageTab.serverSettings.gamePortLockedNote':
 			"A server registered behind the proxy can't have its port changed. Switch to independent exposure first.",
-		'manageTab.serverSettings.logStorageLabel': 'Console log storage',
+		'manageTab.serverSettings.logStorageLabel': 'Auto-clean old logs',
 		'manageTab.serverSettings.logStorageHint':
-			"Saves the console's full output to disk while the server runs, so scrolling up in the console can load history from before you opened it.",
+			"The loader's own logs/ folder just keeps growing on its own and is never cleaned up. Turn this on to have CraftDeck remove old log files for you, using the policy below.",
 		'manageTab.serverSettings.logRetentionModeLabel': 'Retention',
 		'manageTab.serverSettings.logRetentionUnlimited': 'Unlimited',
 		'manageTab.serverSettings.logRetentionAge': 'Roll off by age',
