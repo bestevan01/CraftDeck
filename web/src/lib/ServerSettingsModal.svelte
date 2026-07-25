@@ -57,13 +57,13 @@
 	>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="bg-card border-border w-full max-w-md rounded-lg border p-4 shadow-lg">
+		<div class="bg-card border-border w-full max-w-2xl rounded-lg border p-4 shadow-lg">
 			<div class="mb-1 flex items-center justify-between">
 				<h2 class="font-medium">{$t('manageTab.serverSettings.title')}</h2>
 				<button type="button" class="text-muted-foreground text-sm" onclick={onClose}>&times;</button>
 			</div>
 
-			<div class="mt-3 grid grid-cols-1 gap-3">
+			<div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
 				{#if inst.kind === 'proxy'}
 					<div>
 						<span class="text-muted-foreground mb-1 block text-xs"
@@ -140,15 +140,25 @@
 						<label class="text-muted-foreground mb-1 block text-xs" for="settings-log-mode">
 							{$t('manageTab.serverSettings.logRetentionModeLabel')}
 						</label>
-						<select
-							id="settings-log-mode"
-							bind:value={settingsLogRetentionMode}
-							class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
-						>
-							<option value="unlimited">{$t('manageTab.serverSettings.logRetentionUnlimited')}</option>
-							<option value="age">{$t('manageTab.serverSettings.logRetentionAge')}</option>
-							<option value="size">{$t('manageTab.serverSettings.logRetentionSize')}</option>
-						</select>
+						<div class="relative">
+							<select
+								id="settings-log-mode"
+								bind:value={settingsLogRetentionMode}
+								class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-3 pr-8 text-sm"
+							>
+								<option value="unlimited">{$t('manageTab.serverSettings.logRetentionUnlimited')}</option>
+								<option value="age">{$t('manageTab.serverSettings.logRetentionAge')}</option>
+								<option value="size">{$t('manageTab.serverSettings.logRetentionSize')}</option>
+							</select>
+							<svg
+								class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.5"
+								><path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round" /></svg
+							>
+						</div>
 						{#if settingsLogRetentionMode === 'age'}
 							<div class="mt-2">
 								<label class="text-muted-foreground mb-1 block text-xs" for="settings-log-days">

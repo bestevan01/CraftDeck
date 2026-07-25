@@ -313,17 +313,25 @@
 						player: playerName || $t('consoleTab.gamemode.unspecified')
 					})}
 				</label>
-				<div class="flex gap-2">
+				<div class="relative flex gap-2">
 					<select
 						id="gamemode"
 						bind:value={gamemode}
-						class="border-input bg-background w-full rounded-md border px-2 py-1.5 text-sm"
+						class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-2 pr-8 text-sm"
 					>
 						<option value="survival">{$t('consoleTab.gamemode.survival')}</option>
 						<option value="creative">{$t('consoleTab.gamemode.creative')}</option>
 						<option value="adventure">{$t('consoleTab.gamemode.adventure')}</option>
 						<option value="spectator">{$t('consoleTab.gamemode.spectator')}</option>
 					</select>
+					<svg
+						class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
+						viewBox="0 0 20 20"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.5"
+						><path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round" /></svg
+					>
 				</div>
 				<button
 					class="border-border mt-2 w-full rounded-md border px-2 py-1.5 text-xs"
@@ -336,16 +344,26 @@
 				<label class="text-muted-foreground mb-1 block text-xs" for="difficulty"
 					>{$t('consoleTab.difficulty.label')}</label
 				>
-				<select
-					id="difficulty"
-					bind:value={difficulty}
-					class="border-input bg-background w-full rounded-md border px-2 py-1.5 text-sm"
-				>
-					<option value="peaceful">{$t('consoleTab.difficulty.peaceful')}</option>
-					<option value="easy">{$t('consoleTab.difficulty.easy')}</option>
-					<option value="normal">{$t('consoleTab.difficulty.normal')}</option>
-					<option value="hard">{$t('consoleTab.difficulty.hard')}</option>
-				</select>
+				<div class="relative">
+					<select
+						id="difficulty"
+						bind:value={difficulty}
+						class="border-input bg-background w-full appearance-none rounded-md border py-1.5 pl-2 pr-8 text-sm"
+					>
+						<option value="peaceful">{$t('consoleTab.difficulty.peaceful')}</option>
+						<option value="easy">{$t('consoleTab.difficulty.easy')}</option>
+						<option value="normal">{$t('consoleTab.difficulty.normal')}</option>
+						<option value="hard">{$t('consoleTab.difficulty.hard')}</option>
+					</select>
+					<svg
+						class="text-muted-foreground pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2"
+						viewBox="0 0 20 20"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.5"
+						><path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round" /></svg
+					>
+				</div>
 				<button
 					class="border-border mt-2 w-full rounded-md border px-2 py-1.5 text-xs"
 					onclick={() => onSendCommand(`difficulty ${difficulty}`)}
