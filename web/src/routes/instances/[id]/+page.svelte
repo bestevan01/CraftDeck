@@ -313,9 +313,35 @@
 	let historyExhausted = false;
 	let loadingHistory = $state(false);
 
-	function handleLogScroll(e: Event) {
-		const el = e.currentTarget as HTMLDivElement;
-		if (el.scrollTop < 50) loadOlderHistory();
+	// Pull-to-refresh instead of firing the instant the scrollbar merely
+	// touches the top -- that fired-and-resolved so fast the loading
+	// indicator was barely on screen long enough to register (confirmed:
+	// exactly this complaint). Mirrors the mobile-Chrome interaction: reach
+	// the top, then keep pulling past it before anything actually loads.
+	// scrollTop clamps at 0 with no negative overscroll value on the web,
+	// so this reads wheel deltaY directly instead of the scroll position --
+	// that's the only way to tell "still trying to scroll up while already
+	// at the top" apart from "scrolled up and stopped".
+	const PULL_THRESHOLD = 70;
+	let pullProgress = $state(0); // 0-1, how close to triggering a load
+
+	function handleLogWheel(e: WheelEvent) {
+		if (!logEl || loadingHistory || historyExhausted) return;
+		if (logEl.scrollTop > 0) {
+			pullProgress = 0;
+			return;
+		}
+		if (e.deltaY < 0) {
+			e.preventDefault();
+			const pulled = Math.min(pullProgress * PULL_THRESHOLD - e.deltaY, PULL_THRESHOLD);
+			pullProgress = pulled / PULL_THRESHOLD;
+			if (pulled >= PULL_THRESHOLD) {
+				pullProgress = 0;
+				loadOlderHistory();
+			}
+		} else if (e.deltaY > 0) {
+			pullProgress = Math.max(pullProgress * PULL_THRESHOLD - e.deltaY, 0) / PULL_THRESHOLD;
+		}
 	}
 
 	async function loadOlderHistory() {
@@ -1585,7 +1611,8 @@
 			{lines}
 			{parseLogLine}
 			{loadingHistory}
-			onLogScroll={handleLogScroll}
+			{pullProgress}
+			onLogWheel={handleLogWheel}
 			bind:commandText
 			onSubmitFreeform={submitFreeform}
 			{onlinePlayers}

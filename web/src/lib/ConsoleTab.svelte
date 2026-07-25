@@ -9,7 +9,8 @@
 		lines,
 		parseLogLine,
 		loadingHistory,
-		onLogScroll,
+		pullProgress,
+		onLogWheel,
 		commandText = $bindable(''),
 		onSubmitFreeform,
 		onlinePlayers,
@@ -40,7 +41,8 @@
 		lines: string[];
 		parseLogLine: (line: string) => { prefix: string; message: string; messageClass: string };
 		loadingHistory: boolean;
-		onLogScroll: (e: Event) => void;
+		pullProgress: number;
+		onLogWheel: (e: WheelEvent) => void;
 		commandText: string;
 		onSubmitFreeform: (e: SubmitEvent) => void;
 		onlinePlayers: string[];
@@ -85,7 +87,7 @@
 	</div>
 	<div
 		bind:this={logEl}
-		onscroll={onLogScroll}
+		onwheel={onLogWheel}
 		class="bg-background h-96 overflow-y-auto rounded-md p-3 font-mono text-xs lg:h-auto lg:min-h-0 lg:flex-1"
 	>
 		{#if loadingHistory}
@@ -99,6 +101,22 @@
 					/>
 				</svg>
 				{$t('consoleTab.console.loadingHistory')}
+			</div>
+		{:else if pullProgress > 0}
+			<div
+				class="text-muted-foreground mb-2 flex items-center justify-center gap-1.5 overflow-hidden py-1 text-xs"
+				style="opacity: {pullProgress}; height: {pullProgress * 1.5}rem"
+			>
+				<svg
+					class="h-3 w-3 shrink-0 transition-transform"
+					style="transform: rotate({pullProgress * 180}deg)"
+					viewBox="0 0 20 20"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.5"
+					><path d="M5 7l5 5 5-5" stroke-linecap="round" stroke-linejoin="round" /></svg
+				>
+				{$t('consoleTab.console.pullForHistory')}
 			</div>
 		{/if}
 		{#each lines as line}
