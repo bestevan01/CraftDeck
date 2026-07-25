@@ -46,4 +46,15 @@ type Instance struct {
 	// not-currently-behind-the-proxy server, so it doesn't silently undo
 	// that choice on every daemon restart.
 	ProxyOptOut bool `json:"proxy_opt_out"`
+
+	// LogStorage* control internal/gamelog's per-instance on-disk console
+	// capture (independent of journald's own system-wide retention) --
+	// whether it's on at all, and how accumulated log files get cleaned up.
+	// LogRetentionMode is "unlimited" (never delete), "age" (delete files
+	// older than LogRetentionDays), or "size" (delete oldest files once
+	// total size exceeds LogRetentionMaxMB).
+	LogStorageEnabled bool   `json:"log_storage_enabled"`
+	LogRetentionMode  string `json:"log_retention_mode"`
+	LogRetentionDays  int    `json:"log_retention_days"`
+	LogRetentionMaxMB int    `json:"log_retention_max_mb"`
 }

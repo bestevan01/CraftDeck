@@ -26,6 +26,7 @@ import (
 	"craftdeck/internal/config"
 	"craftdeck/internal/db"
 	"craftdeck/internal/ddns"
+	"craftdeck/internal/gamelog"
 	"craftdeck/internal/hardware"
 	"craftdeck/internal/instance"
 	"craftdeck/internal/network"
@@ -74,6 +75,7 @@ func run() error {
 	hardwareSettings := hardware.NewRepository(database)
 	benchmarkRunner := hardware.NewBenchmarkRunner()
 	updateSettings := update.NewRepository(database)
+	gamelogMgr := gamelog.NewManager()
 	masterKey, err := secrets.LoadOrCreateMasterKey(cfg.MasterKeyPath)
 	if err != nil {
 		return fmt.Errorf("load/create master key: %w", err)
@@ -83,7 +85,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("determine web UI port from %q: %w", cfg.ListenAddr, err)
 	}
-	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey, hardwareSettings, benchmarkRunner, updateSettings)
+	apiServer := api.NewServer(instances, supervisor, rconMgr, users, backups, plugins, cfg.DataDir, networkSettings, portMappings, netManager, webUIPort, domains, ddnsManager, masterKey, hardwareSettings, benchmarkRunner, updateSettings, gamelogMgr)
 	// FR-28/30: wired up after apiServer exists (ddnsManager is built first
 	// since api.NewServer takes it as a constructor argument) -- see
 	// ddns.Manager.SetMainDomainSync's doc comment.
@@ -96,7 +98,7 @@ func run() error {
 	// RCON connection forever (confirmed: this is exactly what happened
 	// after a deploy mid-session -- the game server kept running but
 	// commands stopped working until the user manually restarted it).
-	if err := reconcileInstances(context.Background(), instances, supervisor, rconMgr); err != nil {
+	if err := reconcileInstances(context.Background(), instances, supervisor, rconMgr, gamelogMgr); err != nil {
 		log.Printf("instance reconciliation failed (continuing anyway): %v", err)
 	}
 
@@ -206,7 +208,7 @@ func run() error {
 // brings both instances.status and the RCON manager back in sync with
 // reality, regardless of what was last written to the DB before this
 // process started.
-func reconcileInstances(ctx context.Context, instances *instance.Repository, supervisor *process.Supervisor, rconMgr *rcon.Manager) error {
+func reconcileInstances(ctx context.Context, instances *instance.Repository, supervisor *process.Supervisor, rconMgr *rcon.Manager, gamelogMgr *gamelog.Manager) error {
 	list, err := instances.List(ctx)
 	if err != nil {
 		return err
@@ -228,6 +230,18 @@ func reconcileInstances(ctx context.Context, instances *instance.Repository, sup
 			if inst.Status != instance.StatusRunning {
 				_ = instances.UpdateStatus(ctx, inst.ID, instance.StatusRunning)
 			}
+			// Same reasoning as the RCON manager just above: a fresh
+			// process starts with an empty gamelog.Manager too, so an
+			// instance that was already running before this restart (e.g.
+			// craftdeckd self-updating mid-session) would otherwise lose
+			// console history capture for good until someone happened to
+			// restart that instance too.
+			gamelogMgr.StartCapturing(inst.ID, "craftdeck-instance-"+inst.ID, filepath.Join(inst.WorkDir, "logs"), gamelog.Settings{
+				Enabled:        inst.LogStorageEnabled,
+				RetentionMode:  inst.LogRetentionMode,
+				RetentionDays:  inst.LogRetentionDays,
+				RetentionMaxMB: inst.LogRetentionMaxMB,
+			})
 		} else if inst.Status == instance.StatusRunning || inst.Status == instance.StatusStarting {
 			_ = instances.UpdateStatus(ctx, inst.ID, instance.StatusStopped)
 		}

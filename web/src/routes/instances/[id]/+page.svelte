@@ -281,12 +281,71 @@
 		}
 	}
 
+	// Raised by 500 every time "scroll up for more" (loadOlderHistory below)
+	// successfully prepends a page of history, so a live line arriving
+	// afterward trims the buffer back down to the base 500 without also
+	// silently discarding history the operator just scrolled up to read.
+	let historyLoadedCount = 0;
+
 	function appendLine(line: string) {
+		// Only auto-scroll to the bottom if the operator was already there --
+		// otherwise a new live line while they're mid-read of scrolled-up
+		// history would yank the view back down out from under them.
+		const nearBottom =
+			!logEl || logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 50;
 		lines = [...lines, line];
-		if (lines.length > 500) lines = lines.slice(-500); // cap client-side buffer
-		tick().then(() => {
-			logEl?.scrollTo({ top: logEl.scrollHeight });
-		});
+		const cap = 500 + historyLoadedCount;
+		if (lines.length > cap) lines = lines.slice(-cap); // cap client-side buffer
+		if (nearBottom) {
+			tick().then(() => {
+				logEl?.scrollTo({ top: logEl.scrollHeight });
+			});
+		}
+	}
+
+	// Console "scroll up for more" (see gamelog's per-instance on-disk
+	// capture) -- historyBefore is the oldest loaded entry's own
+	// timestamp, so each successive call walks strictly further back;
+	// historyExhausted stops calling once the backend reports nothing
+	// older is left (or log storage is off/empty for this instance, which
+	// also just reports has_more: false immediately).
+	let historyBefore: string | undefined;
+	let historyExhausted = false;
+	let loadingHistory = false;
+
+	function handleLogScroll(e: Event) {
+		const el = e.currentTarget as HTMLDivElement;
+		if (el.scrollTop < 50) loadOlderHistory();
+	}
+
+	async function loadOlderHistory() {
+		if (loadingHistory || historyExhausted || !logEl) return;
+		loadingHistory = true;
+		try {
+			const res = await api.getConsoleHistory(id, historyBefore, 500);
+			if (res.lines.length === 0) {
+				historyExhausted = true;
+				return;
+			}
+			historyBefore = res.lines[0].at;
+			historyExhausted = !res.has_more;
+			historyLoadedCount += res.lines.length;
+
+			const prevScrollHeight = logEl.scrollHeight;
+			const prevScrollTop = logEl.scrollTop;
+			lines = [...res.lines.map((e) => e.line), ...lines];
+			await tick();
+			// Prepending content above the current scroll position shifts
+			// everything down visually unless the scroll offset is
+			// corrected by exactly how much taller the content just got --
+			// otherwise the view would jump to show the newly-loaded lines
+			// instead of staying put where the operator was reading.
+			logEl.scrollTop = logEl.scrollHeight - prevScrollHeight + prevScrollTop;
+		} catch {
+			// soft-fail: leave lines as-is, the next scroll-to-top retries
+		} finally {
+			loadingHistory = false;
+		}
 	}
 
 	// Minecraft log lines look like "[09:50:34] [Server thread/INFO]: msg".
@@ -440,6 +499,10 @@
 	let settingsCpu = $state(0); // percent, 0 = unlimited
 	let settingsMemoryGB = $state(1);
 	let settingsGamePort = $state(25566);
+	let settingsLogStorageEnabled = $state(true);
+	let settingsLogRetentionMode = $state<'unlimited' | 'age' | 'size'>('age');
+	let settingsLogRetentionDays = $state(30);
+	let settingsLogRetentionMaxMB = $state(500);
 	let settingsError = $state('');
 	let settingsSaving = $state(false);
 	let pendingRestart = $state(false);
@@ -509,6 +572,10 @@
 			Math.max(1, Math.round(inst.memory_max_mb / 1024) || 1)
 		);
 		settingsGamePort = inst.game_port;
+		settingsLogStorageEnabled = inst.log_storage_enabled;
+		settingsLogRetentionMode = inst.log_retention_mode;
+		settingsLogRetentionDays = inst.log_retention_days;
+		settingsLogRetentionMaxMB = inst.log_retention_max_mb;
 		settingsError = '';
 		editingSettings = true;
 	}
@@ -522,7 +589,11 @@
 			inst = await api.updateInstance(id, {
 				cpu_quota_percent: settingsCpu,
 				memory_max_mb: settingsMemoryGB * 1024,
-				...(canEditGamePort ? { game_port: settingsGamePort } : {})
+				...(canEditGamePort ? { game_port: settingsGamePort } : {}),
+				log_storage_enabled: settingsLogStorageEnabled,
+				log_retention_mode: settingsLogRetentionMode,
+				log_retention_days: settingsLogRetentionDays,
+				log_retention_max_mb: settingsLogRetentionMaxMB
 			});
 			editingSettings = false;
 			computePendingRestart();
@@ -1506,6 +1577,7 @@
 			{wsStatus}
 			{lines}
 			{parseLogLine}
+			onLogScroll={handleLogScroll}
 			bind:commandText
 			onSubmitFreeform={submitFreeform}
 			{onlinePlayers}
@@ -1576,6 +1648,10 @@
 		{canEditGamePort}
 		{maxMemoryGB}
 		{ramBoundaryGB}
+		bind:settingsLogStorageEnabled
+		bind:settingsLogRetentionMode
+		bind:settingsLogRetentionDays
+		bind:settingsLogRetentionMaxMB
 		{settingsError}
 		{settingsSaving}
 		onSave={saveSettings}

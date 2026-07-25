@@ -22,7 +22,13 @@ export type Instance = {
 	status: InstanceStatus;
 	created_at: string;
 	proxy_opt_out: boolean;
+	log_storage_enabled: boolean;
+	log_retention_mode: 'unlimited' | 'age' | 'size';
+	log_retention_days: number;
+	log_retention_max_mb: number;
 };
+
+export type ConsoleHistoryEntry = { at: string; line: string };
 
 export type SystemResources = {
 	cpu_percent: number;
@@ -423,7 +429,15 @@ export const api = {
 	},
 	updateInstance: (
 		id: string,
-		body: { cpu_quota_percent: number; memory_max_mb: number; game_port?: number }
+		body: {
+			cpu_quota_percent: number;
+			memory_max_mb: number;
+			game_port?: number;
+			log_storage_enabled: boolean;
+			log_retention_mode: 'unlimited' | 'age' | 'size';
+			log_retention_days: number;
+			log_retention_max_mb: number;
+		}
 	) => req<Instance>(`/api/instances/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
 	// FR-4, scoped to "redownload the same loader for the same mc_version" --
 	// see handleReinstallLoader. Omit loaderVersion (or pass '') for "always
@@ -663,5 +677,16 @@ export const api = {
 	consoleURL: (id: string) => {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 		return `${proto}://${location.host}/api/instances/${id}/console`;
+	},
+	// "Load more" scrollback for the console, served from gamelog's on-disk
+	// per-instance capture rather than the WebSocket's live/recent-50
+	// stream. before is a previously-returned entry's `at` (omit for "now",
+	// i.e. the very first page).
+	getConsoleHistory: (id: string, before?: string, limit = 500) => {
+		const params = new URLSearchParams({ limit: String(limit) });
+		if (before) params.set('before', before);
+		return req<{ lines: ConsoleHistoryEntry[]; has_more: boolean }>(
+			`/api/instances/${id}/console/history?${params}`
+		);
 	}
 };

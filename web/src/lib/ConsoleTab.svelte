@@ -8,6 +8,7 @@
 		wsStatus,
 		lines,
 		parseLogLine,
+		onLogScroll,
 		commandText = $bindable(''),
 		onSubmitFreeform,
 		onlinePlayers,
@@ -37,6 +38,7 @@
 		wsStatus: 'connecting' | 'open' | 'closed';
 		lines: string[];
 		parseLogLine: (line: string) => { prefix: string; message: string; messageClass: string };
+		onLogScroll: (e: Event) => void;
 		commandText: string;
 		onSubmitFreeform: (e: SubmitEvent) => void;
 		onlinePlayers: string[];
@@ -81,6 +83,7 @@
 	</div>
 	<div
 		bind:this={logEl}
+		onscroll={onLogScroll}
 		class="bg-background h-96 overflow-y-auto rounded-md p-3 font-mono text-xs lg:h-auto lg:min-h-0 lg:flex-1"
 	>
 		{#each lines as line}

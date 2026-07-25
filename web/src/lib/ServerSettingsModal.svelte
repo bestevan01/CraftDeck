@@ -12,6 +12,10 @@
 		canEditGamePort,
 		maxMemoryGB,
 		ramBoundaryGB,
+		settingsLogStorageEnabled = $bindable(true),
+		settingsLogRetentionMode = $bindable('age'),
+		settingsLogRetentionDays = $bindable(30),
+		settingsLogRetentionMaxMB = $bindable(500),
 		settingsError,
 		settingsSaving,
 		onSave,
@@ -25,6 +29,10 @@
 		canEditGamePort: boolean;
 		maxMemoryGB: number;
 		ramBoundaryGB: number;
+		settingsLogStorageEnabled: boolean;
+		settingsLogRetentionMode: 'unlimited' | 'age' | 'size';
+		settingsLogRetentionDays: number;
+		settingsLogRetentionMaxMB: number;
 		settingsError: string;
 		settingsSaving: boolean;
 		onSave: () => void;
@@ -111,6 +119,62 @@
 							<p class="text-muted-foreground mt-1 text-xs">
 								{$t('manageTab.serverSettings.gamePortLockedNote')}
 							</p>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<div class="border-border mt-3 rounded-md border p-3">
+				<label class="flex items-center justify-between text-xs" for="settings-log-storage">
+					<span>{$t('manageTab.serverSettings.logStorageLabel')}</span>
+					<input
+						id="settings-log-storage"
+						type="checkbox"
+						bind:checked={settingsLogStorageEnabled}
+						class="h-4 w-4"
+					/>
+				</label>
+				<p class="text-muted-foreground mt-1 text-xs">{$t('manageTab.serverSettings.logStorageHint')}</p>
+				{#if settingsLogStorageEnabled}
+					<div class="mt-2">
+						<label class="text-muted-foreground mb-1 block text-xs" for="settings-log-mode">
+							{$t('manageTab.serverSettings.logRetentionModeLabel')}
+						</label>
+						<select
+							id="settings-log-mode"
+							bind:value={settingsLogRetentionMode}
+							class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
+						>
+							<option value="unlimited">{$t('manageTab.serverSettings.logRetentionUnlimited')}</option>
+							<option value="age">{$t('manageTab.serverSettings.logRetentionAge')}</option>
+							<option value="size">{$t('manageTab.serverSettings.logRetentionSize')}</option>
+						</select>
+						{#if settingsLogRetentionMode === 'age'}
+							<div class="mt-2">
+								<label class="text-muted-foreground mb-1 block text-xs" for="settings-log-days">
+									{$t('manageTab.serverSettings.logRetentionDaysLabel')}
+								</label>
+								<input
+									id="settings-log-days"
+									type="number"
+									min="1"
+									bind:value={settingsLogRetentionDays}
+									class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
+								/>
+							</div>
+						{:else if settingsLogRetentionMode === 'size'}
+							<div class="mt-2">
+								<label class="text-muted-foreground mb-1 block text-xs" for="settings-log-maxmb">
+									{$t('manageTab.serverSettings.logRetentionMaxMBLabel')}
+								</label>
+								<input
+									id="settings-log-maxmb"
+									type="number"
+									min="1"
+									bind:value={settingsLogRetentionMaxMB}
+									class="border-input bg-background w-full rounded-md border px-3 py-1.5 text-sm"
+								/>
+							</div>
 						{/if}
 					</div>
 				{/if}

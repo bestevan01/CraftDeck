@@ -38,7 +38,8 @@ func (r *Repository) Get(ctx context.Context, id string) (*Instance, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, loader, loader_version, mc_version, java_major,
 			game_port, rcon_port, rcon_password, cpu_quota_percent,
-			memory_max_mb, work_dir, status, created_at, proxy_opt_out
+			memory_max_mb, work_dir, status, created_at, proxy_opt_out,
+			log_storage_enabled, log_retention_mode, log_retention_days, log_retention_max_mb
 		FROM instances WHERE id = ?`, id)
 	return scanInstance(row)
 }
@@ -47,7 +48,8 @@ func (r *Repository) List(ctx context.Context) ([]*Instance, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, kind, loader, loader_version, mc_version, java_major,
 			game_port, rcon_port, rcon_password, cpu_quota_percent,
-			memory_max_mb, work_dir, status, created_at, proxy_opt_out
+			memory_max_mb, work_dir, status, created_at, proxy_opt_out,
+			log_storage_enabled, log_retention_mode, log_retention_days, log_retention_max_mb
 		FROM instances ORDER BY created_at`)
 	if err != nil {
 		return nil, fmt.Errorf("list instances: %w", err)
@@ -109,6 +111,19 @@ func (r *Repository) SetProxyOptOut(ctx context.Context, id string, optOut bool)
 	return err
 }
 
+// UpdateLogSettings changes the operator-facing gamelog capture controls
+// (see Instance.LogStorage* doc comment). Callers restart the instance's
+// capture goroutine (gamelog.Manager.StartCapturing) right after this so a
+// toggle/mode change takes effect immediately rather than needing a
+// server restart.
+func (r *Repository) UpdateLogSettings(ctx context.Context, id string, enabled bool, mode string, days, maxMB int) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE instances
+		SET log_storage_enabled = ?, log_retention_mode = ?, log_retention_days = ?, log_retention_max_mb = ?
+		WHERE id = ?`, enabled, mode, days, maxMB, id)
+	return err
+}
+
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM instances WHERE id = ?`, id)
 	return err
@@ -127,6 +142,7 @@ func scanInstance(row rowScanner) (*Instance, error) {
 		&inst.MCVersion, &inst.JavaMajor, &inst.GamePort, &inst.RCONPort,
 		&inst.RCONPassword, &inst.CPUQuotaPercent, &inst.MemoryMaxMB,
 		&inst.WorkDir, &inst.Status, &createdAt, &inst.ProxyOptOut,
+		&inst.LogStorageEnabled, &inst.LogRetentionMode, &inst.LogRetentionDays, &inst.LogRetentionMaxMB,
 	)
 	if err != nil {
 		return nil, err

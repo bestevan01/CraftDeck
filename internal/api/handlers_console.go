@@ -5,7 +5,11 @@ import (
 	"context"
 	"net/http"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"time"
+
+	"craftdeck/internal/gamelog"
 
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -116,4 +120,55 @@ func (s *Server) handleConsoleWebSocket(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+}
+
+type consoleHistoryEntry struct {
+	At   string `json:"at"`
+	Line string `json:"line"`
+}
+
+// handleConsoleHistory serves the console's "scroll up for more" older
+// history from gamelog's on-disk per-instance capture (see
+// internal/gamelog), independent of both journald's own retention and of
+// the WebSocket handler's live/recent-50 stream above. before defaults to
+// now (the very first "load more" call) and is otherwise the `at` of the
+// oldest entry already loaded client-side, so each call walks strictly
+// further back. Returns entries oldest-of-the-batch-first, ready to
+// prepend directly to whatever's already displayed.
+func (s *Server) handleConsoleHistory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	inst, err := s.instances.Get(r.Context(), id)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
+	before := time.Now()
+	if v := r.URL.Query().Get("before"); v != "" {
+		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			before = t
+		}
+	}
+	limit := 500
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+			limit = n
+		}
+	}
+
+	logsDir := filepath.Join(inst.WorkDir, "logs")
+	entries, hasMore, err := gamelog.ReadHistory(logsDir, before, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	out := make([]consoleHistoryEntry, len(entries))
+	for i, e := range entries {
+		out[i] = consoleHistoryEntry{At: e.At.Format(time.RFC3339Nano), Line: e.Line}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"lines":    out,
+		"has_more": hasMore,
+	})
 }

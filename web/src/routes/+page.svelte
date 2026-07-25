@@ -1144,7 +1144,11 @@
 				if (currentGB === item.memoryGB) continue;
 				await api.updateInstance(item.id, {
 					cpu_quota_percent: original.cpu_quota_percent,
-					memory_max_mb: item.memoryGB * 1024
+					memory_max_mb: item.memoryGB * 1024,
+					log_storage_enabled: original.log_storage_enabled,
+					log_retention_mode: original.log_retention_mode,
+					log_retention_days: original.log_retention_days,
+					log_retention_max_mb: original.log_retention_max_mb
 				});
 				// Already-running instances (not the target, which is about to
 				// be started fresh right below and picks up its new allocation
