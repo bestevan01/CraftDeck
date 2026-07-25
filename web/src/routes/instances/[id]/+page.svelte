@@ -311,7 +311,7 @@
 	// also just reports has_more: false immediately).
 	let historyBefore: string | undefined;
 	let historyExhausted = false;
-	let loadingHistory = false;
+	let loadingHistory = $state(false);
 
 	function handleLogScroll(e: Event) {
 		const el = e.currentTarget as HTMLDivElement;
@@ -331,6 +331,13 @@
 			historyExhausted = !res.has_more;
 			historyLoadedCount += res.lines.length;
 
+			// Turned off *before* measuring/prepending, not in `finally` --
+			// otherwise the "불러오는 중" indicator's own height is still
+			// part of prevScrollHeight but gone by the time the correction
+			// below applies, leaving the view a few pixels off from where
+			// the operator actually was.
+			loadingHistory = false;
+			await tick(); // let the indicator's removal actually flush to the DOM first
 			const prevScrollHeight = logEl.scrollHeight;
 			const prevScrollTop = logEl.scrollTop;
 			lines = [...res.lines.map((e) => e.line), ...lines];
@@ -1577,6 +1584,7 @@
 			{wsStatus}
 			{lines}
 			{parseLogLine}
+			{loadingHistory}
 			onLogScroll={handleLogScroll}
 			bind:commandText
 			onSubmitFreeform={submitFreeform}

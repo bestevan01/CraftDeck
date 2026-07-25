@@ -8,6 +8,7 @@
 		wsStatus,
 		lines,
 		parseLogLine,
+		loadingHistory,
 		onLogScroll,
 		commandText = $bindable(''),
 		onSubmitFreeform,
@@ -38,6 +39,7 @@
 		wsStatus: 'connecting' | 'open' | 'closed';
 		lines: string[];
 		parseLogLine: (line: string) => { prefix: string; message: string; messageClass: string };
+		loadingHistory: boolean;
 		onLogScroll: (e: Event) => void;
 		commandText: string;
 		onSubmitFreeform: (e: SubmitEvent) => void;
@@ -86,6 +88,19 @@
 		onscroll={onLogScroll}
 		class="bg-background h-96 overflow-y-auto rounded-md p-3 font-mono text-xs lg:h-auto lg:min-h-0 lg:flex-1"
 	>
+		{#if loadingHistory}
+			<div class="text-muted-foreground mb-2 flex items-center justify-center gap-1.5 py-1 text-xs">
+				<svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+					<path
+						class="opacity-75"
+						fill="currentColor"
+						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+					/>
+				</svg>
+				{$t('consoleTab.console.loadingHistory')}
+			</div>
+		{/if}
 		{#each lines as line}
 			{@const parsed = parseLogLine(line)}
 			<div class="whitespace-pre-wrap">
