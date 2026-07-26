@@ -849,7 +849,17 @@ func (s *Server) startInstanceCore(ctx context.Context, inst *instance.Instance)
 		return err
 	}
 
-	javaArgs := []string{}
+	// Log4j2's %d{...MMM...} date pattern (used in the loader's own rotated
+	// log files, e.g. NeoForge's "[25Jul2026 23:54:03.844]") renders the
+	// month abbreviation according to the JVM's default locale, which
+	// otherwise just inherits whatever the host OS is set to -- on a
+	// Korean-locale Pi that comes out as "25 7월 2026" instead of
+	// "25Jul2026" (confirmed: exactly this, mixed in with logs/latest.log's
+	// own separate, locale-independent "[HH:MM:SS]" format, which is what
+	// made it look inconsistent/corrupted between live and historical
+	// lines). Pinning the JVM's locale here keeps that consistent
+	// regardless of the underlying system's language setting.
+	javaArgs := []string{"-Duser.language=en", "-Duser.country=US"}
 	if inst.MemoryMaxMB > 0 {
 		javaArgs = append(javaArgs, fmt.Sprintf("-Xmx%dM", inst.MemoryMaxMB))
 	}
