@@ -28,6 +28,15 @@
 	let pressedBackdrop = false;
 	let activeTab = $state<'description' | 'changelog' | 'versions'>('description');
 
+	// This component instance stays mounted (just hidden) whenever `open`
+	// goes false, so activeTab would otherwise keep whatever tab it was on
+	// the last time the modal closed -- confirmed: reopening it on a
+	// different mod still showed whatever tab was open before. Always land
+	// on 설명 first regardless of where the operator left off.
+	$effect(() => {
+		if (open) activeTab = 'description';
+	});
+
 	// Release first, then Beta, then Alpha -- each already newest-first
 	// within its own group since the backend passes versions through in
 	// Modrinth's own (date_published descending) order.
