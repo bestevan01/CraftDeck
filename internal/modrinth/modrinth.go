@@ -86,7 +86,8 @@ type Version struct {
 type Project struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
-	Description string   `json:"description"`
+	Description string   `json:"description"` // short one-line summary
+	Body        string   `json:"body"`         // full Markdown description shown on the project's own page
 	Categories  []string `json:"categories"`
 	IconURL     string   `json:"icon_url"`
 }

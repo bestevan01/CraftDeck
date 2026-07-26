@@ -320,6 +320,7 @@ export type PluginProject = {
 	id: string;
 	title: string;
 	description: string;
+	body: string;
 	categories: string[];
 	icon_url: string;
 };

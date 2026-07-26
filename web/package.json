@@ -39,6 +39,8 @@
 		"@lucide/svelte": "^1.23.0",
 		"bits-ui": "^2.18.1",
 		"clsx": "^2.1.1",
+		"dompurify": "^3.4.12",
+		"marked": "^18.0.7",
 		"tailwind-merge": "^3.6.0",
 		"tailwind-variants": "^3.2.2"
 	}
