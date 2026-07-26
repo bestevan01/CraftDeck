@@ -182,6 +182,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/instances/{id}/world/import", s.handleImportWorld)
 
 	mux.HandleFunc("GET /api/instances/{id}/plugins/search", s.handleSearchPlugins)
+	mux.HandleFunc("GET /api/instances/{id}/plugins/projects/{projectId}", s.handleGetPluginProject)
 	mux.HandleFunc("GET /api/instances/{id}/plugins", s.handleListPlugins)
 	mux.HandleFunc("POST /api/instances/{id}/plugins", s.handleInstallPlugin)
 	mux.HandleFunc("POST /api/instances/{id}/plugins/upload", s.handleUploadPlugin)

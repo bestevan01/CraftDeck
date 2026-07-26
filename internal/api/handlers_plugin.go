@@ -106,6 +106,49 @@ func (s *Server) handleSearchPlugins(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, hits)
 }
 
+type pluginProjectResponse struct {
+	Project  *modrinth.Project  `json:"project"`
+	Versions []modrinth.Version `json:"versions"`
+}
+
+// handleGetPluginProject backs the search result detail modal -- the full
+// description/categories the flat search-hit list doesn't have room for,
+// plus every version actually compatible with this instance's loader and
+// Minecraft version (not just whichever one BestVersion would auto-pick),
+// so the operator can see and choose between Release/Beta/Alpha channels
+// themselves instead of only ever getting the one BestVersion resolves to.
+func (s *Server) handleGetPluginProject(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	inst, err := s.instances.Get(ctx, r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	if !searchSupported(inst.Loader) {
+		http.Error(w, "Modrinth isn't supported for this instance's loader", http.StatusBadRequest)
+		return
+	}
+	projectID := r.PathValue("projectId")
+
+	project, err := modrinth.GetProject(ctx, projectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	all, err := modrinth.ProjectVersions(ctx, projectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	compatible := make([]modrinth.Version, 0, len(all))
+	for _, v := range all {
+		if v.SupportsLoaderAndMC(inst.Loader, inst.MCVersion) {
+			compatible = append(compatible, v)
+		}
+	}
+	writeJSON(w, http.StatusOK, pluginProjectResponse{Project: project, Versions: compatible})
+}
+
 // handleListPlugins reads from our own DB records rather than re-scanning
 // the plugins/ directory, so a Modrinth outage never affects viewing or
 // managing already-installed plugins (FR-6b).
@@ -139,6 +182,10 @@ func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 
 type installPluginRequest struct {
 	ProjectID string `json:"project_id"`
+	// VersionID is optional -- empty means "auto-pick the best compatible
+	// version" (see modrinth.BestVersion), set when the operator chose a
+	// specific version/channel from the detail modal instead.
+	VersionID string `json:"version_id"`
 }
 
 func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +208,7 @@ func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	installed, err := s.installModrinthPlugin(ctx, inst, req.ProjectID, "")
+	installed, err := s.installModrinthPlugin(ctx, inst, req.ProjectID, "", req.VersionID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -169,8 +216,8 @@ func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, installed)
 }
 
-// installModrinthPlugin downloads projectID's newest version compatible
-// with inst's loader/Minecraft version, verifies its SHA-512 against what
+// installModrinthPlugin downloads a version of projectID compatible with
+// inst's loader/Minecraft version, verifies its SHA-512 against what
 // Modrinth published (FR-6d), and recursively installs any required
 // dependency that isn't already present (FR-6c). parentID is the ID of the
 // plugin whose dependency resolution triggered this install, or "" for a
@@ -181,7 +228,13 @@ func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 // several mods (Fabric API being needed by half a dozen Fabric mods is the
 // common case) needs all of those relationships visible, not just the
 // first one.
-func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Instance, projectID string, parentID string) (*plugin.Plugin, error) {
+//
+// versionID picks an exact version instead of auto-selecting the best
+// compatible one (see modrinth.BestVersion) -- only ever set for a
+// top-level install where the operator chose a specific version/channel in
+// the detail modal; every recursive dependency call below passes "" since a
+// dependency's own version was never something the operator picked.
+func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Instance, projectID string, parentID string, versionID string) (*plugin.Plugin, error) {
 	if existing, err := s.plugins.FindByModrinthProject(ctx, inst.ID, projectID); err != nil {
 		return nil, err
 	} else if existing != nil {
@@ -193,9 +246,21 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		return existing, nil // already installed -- common for shared dependencies
 	}
 
-	version, err := modrinth.BestVersion(ctx, projectID, inst.Loader, inst.MCVersion)
-	if err != nil {
-		return nil, err
+	var version *modrinth.Version
+	var err error
+	if versionID != "" {
+		version, err = modrinth.GetVersion(ctx, versionID)
+		if err != nil {
+			return nil, err
+		}
+		if version.ProjectID != projectID {
+			return nil, fmt.Errorf("version %s does not belong to project %s", versionID, projectID)
+		}
+	} else {
+		version, err = modrinth.BestVersion(ctx, projectID, inst.Loader, inst.MCVersion)
+		if err != nil {
+			return nil, err
+		}
 	}
 	file, err := version.PrimaryFile()
 	if err != nil {
@@ -241,6 +306,8 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		ModrinthVersionID:     version.ID,
 		Filename:              file.Filename,
 		Title:                 title,
+		VersionNumber:         version.VersionNumber,
+		VersionChannel:        version.VersionType,
 		SHA512:                expectedSHA512,
 		Enabled:               true,
 		InstalledAsDependency: parentID != "",
@@ -260,7 +327,7 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		if dep.DependencyType != "required" || dep.ProjectID == "" {
 			continue
 		}
-		if _, err := s.installModrinthPlugin(ctx, inst, dep.ProjectID, p.ID); err != nil {
+		if _, err := s.installModrinthPlugin(ctx, inst, dep.ProjectID, p.ID, ""); err != nil {
 			// The primary plugin is already installed successfully; a
 			// dependency failure shouldn't undo that, just get logged so
 			// the operator can install it manually if actually needed.

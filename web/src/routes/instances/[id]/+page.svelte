@@ -9,6 +9,8 @@
 		type WorldInfo,
 		type Plugin,
 		type PluginSearchHit,
+		type PluginProject,
+		type PluginVersion,
 		type FileEntry,
 		type BuildInfo,
 		type ServerSetting,
@@ -21,6 +23,7 @@
 	import ConfirmDialog from '$lib/ConfirmDialog.svelte';
 	import ReasonModal from '$lib/ReasonModal.svelte';
 	import PluginSearchModal from '$lib/PluginSearchModal.svelte';
+	import PluginDetailModal from '$lib/PluginDetailModal.svelte';
 	import GameSettingsModal from '$lib/GameSettingsModal.svelte';
 	import ServerSettingsModal from '$lib/ServerSettingsModal.svelte';
 	import ManageTab from '$lib/ManageTab.svelte';
@@ -985,10 +988,22 @@
 	let pluginSearchResults = $state<PluginSearchHit[]>([]);
 	let pluginSearchError = $state('');
 	let searchingPlugins = $state(false);
-	let installingProjectId = $state<string | null>(null);
 	let uploadingPlugin = $state(false);
 	let busyPluginId = $state<string | null>(null);
 	let showPluginSearchModal = $state(false);
+
+	// Detail modal (opened from a search result's title) -- description/
+	// categories plus every version actually compatible with this instance,
+	// grouped by Release/Beta/Alpha so the operator picks the channel/build
+	// themselves instead of only ever getting whichever one auto-install
+	// (BestVersion) would have resolved to.
+	let showPluginDetailModal = $state(false);
+	let pluginDetailProject = $state<PluginProject | null>(null);
+	let pluginDetailVersions = $state<PluginVersion[]>([]);
+	let loadingPluginDetail = $state(false);
+	let pluginDetailError = $state('');
+	let installingVersionId = $state<string | null>(null);
+	let pluginInstallError = $state('');
 
 	function openPluginSearchModal() {
 		pluginQuery = '';
@@ -1019,16 +1034,40 @@
 		}
 	}
 
-	async function installPlugin(projectId: string) {
-		installingProjectId = projectId;
-		pluginsError = '';
+	async function openPluginDetailModal(projectId: string) {
+		showPluginDetailModal = true;
+		loadingPluginDetail = true;
+		pluginDetailError = '';
+		pluginInstallError = '';
+		pluginDetailProject = null;
+		pluginDetailVersions = [];
 		try {
-			await api.installPlugin(id, projectId);
-			await refreshPlugins();
+			const res = await api.getPluginProject(id, projectId);
+			pluginDetailProject = res.project;
+			pluginDetailVersions = res.versions;
 		} catch (err) {
-			pluginsError = err instanceof Error ? err.message : String(err);
+			pluginDetailError = err instanceof Error ? err.message : String(err);
 		} finally {
-			installingProjectId = null;
+			loadingPluginDetail = false;
+		}
+	}
+
+	function closePluginDetailModal() {
+		showPluginDetailModal = false;
+	}
+
+	async function installPluginVersion(versionId: string) {
+		if (!pluginDetailProject) return;
+		installingVersionId = versionId;
+		pluginInstallError = '';
+		try {
+			await api.installPlugin(id, pluginDetailProject.id, versionId);
+			await refreshPlugins();
+			showPluginDetailModal = false;
+		} catch (err) {
+			pluginInstallError = err instanceof Error ? err.message : String(err);
+		} finally {
+			installingVersionId = null;
 		}
 	}
 
@@ -1656,9 +1695,20 @@
 	results={pluginSearchResults}
 	error={pluginSearchError}
 	searching={searchingPlugins}
-	{installingProjectId}
 	onSearch={searchPlugins}
-	onInstall={installPlugin}
+	onSelectProject={openPluginDetailModal}
+/>
+
+<PluginDetailModal
+	bind:open={showPluginDetailModal}
+	project={pluginDetailProject}
+	versions={pluginDetailVersions}
+	loading={loadingPluginDetail}
+	error={pluginDetailError}
+	{installingVersionId}
+	installError={pluginInstallError}
+	onInstallVersion={installPluginVersion}
+	onClose={closePluginDetailModal}
 />
 
 <GameSettingsModal

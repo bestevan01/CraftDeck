@@ -316,6 +316,31 @@ export type PluginSearchHit = {
 	icon_url: string;
 };
 
+export type PluginProject = {
+	id: string;
+	title: string;
+	description: string;
+	categories: string[];
+	icon_url: string;
+};
+
+export type PluginVersion = {
+	id: string;
+	project_id: string;
+	name: string;
+	version_number: string;
+	version_type: 'release' | 'beta' | 'alpha';
+	changelog: string;
+	date_published: string;
+	game_versions: string[];
+	loaders: string[];
+};
+
+export type PluginProjectDetail = {
+	project: PluginProject;
+	versions: PluginVersion[];
+};
+
 export type Plugin = {
 	id: string;
 	instance_id: string;
@@ -324,6 +349,8 @@ export type Plugin = {
 	modrinth_version_id?: string;
 	filename: string;
 	title?: string;
+	version_number?: string;
+	version_channel?: 'release' | 'beta' | 'alpha';
 	sha512?: string;
 	enabled: boolean;
 	installed_as_dependency: boolean;
@@ -633,11 +660,16 @@ export const api = {
 		req<void>(`/api/instances/${id}/backups/${backupId}`, { method: 'DELETE' }),
 	searchPlugins: (id: string, query: string) =>
 		req<PluginSearchHit[]>(`/api/instances/${id}/plugins/search?query=${encodeURIComponent(query)}`),
+	// Full description/categories plus every version actually compatible
+	// with this instance (not just whichever one auto-install would pick) --
+	// backs the search result detail modal's channel/version picker.
+	getPluginProject: (id: string, projectId: string) =>
+		req<PluginProjectDetail>(`/api/instances/${id}/plugins/projects/${encodeURIComponent(projectId)}`),
 	listPlugins: (id: string) => req<Plugin[]>(`/api/instances/${id}/plugins`),
-	installPlugin: (id: string, projectId: string) =>
+	installPlugin: (id: string, projectId: string, versionId?: string) =>
 		req<Plugin>(`/api/instances/${id}/plugins`, {
 			method: 'POST',
-			body: JSON.stringify({ project_id: projectId })
+			body: JSON.stringify({ project_id: projectId, version_id: versionId ?? '' })
 		}),
 	uploadPlugin: async (id: string, file: File) => {
 		const form = new FormData();

@@ -59,6 +59,14 @@
 	<div class="border-border flex items-center justify-between rounded-md border px-2 py-1.5 text-xs">
 		<span title={p.filename}>
 			{p.title || p.filename}
+			{#if p.version_number}
+				<span class="text-muted-foreground ml-1">{p.version_number}</span>
+			{/if}
+			{#if p.version_channel && p.version_channel !== 'release'}
+				<span class="bg-muted text-muted-foreground ml-1 rounded px-1 py-0.5 text-[10px] uppercase"
+					>{p.version_channel}</span
+				>
+			{/if}
 			{#if !p.enabled}<span class="text-muted-foreground">{$t('pluginsTab.disabledTag')}</span>{/if}
 		</span>
 		<div class="flex shrink-0 gap-1.5">

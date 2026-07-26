@@ -71,22 +71,28 @@ type Version struct {
 	ProjectID     string        `json:"project_id"`
 	Name          string        `json:"name"`
 	VersionNumber string        `json:"version_number"`
+	VersionType   string        `json:"version_type"` // "release", "beta", or "alpha"
+	Changelog     string        `json:"changelog"`
+	DatePublished string        `json:"date_published"`
 	GameVersions  []string      `json:"game_versions"`
 	Loaders       []string      `json:"loaders"`
 	Dependencies  []Dependency  `json:"dependencies"`
 	Files         []VersionFile `json:"files"`
 }
 
-// Project is the subset of a Modrinth project's details CraftDeck needs --
-// just enough to show the mod/plugin's real display name instead of its
-// downloaded jar filename.
+// Project is the subset of a Modrinth project's details CraftDeck's UI
+// shows -- enough for the detail modal (description, categories) plus the
+// display name already used for installed plugins/mods.
 type Project struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Categories  []string `json:"categories"`
+	IconURL     string   `json:"icon_url"`
 }
 
 // GetProject fetches projectID's details (FR-6, display name for installed
-// plugins/mods).
+// plugins/mods, plus description/categories for the detail modal).
 func GetProject(ctx context.Context, projectID string) (*Project, error) {
 	var p Project
 	if err := getJSON(ctx, apiBase+"/project/"+url.PathEscape(projectID), &p); err != nil {
@@ -105,19 +111,78 @@ func ProjectVersions(ctx context.Context, projectID string) ([]Version, error) {
 	return versions, nil
 }
 
-// BestVersion picks the newest version of projectID compatible with loader
-// and mcVersion (FR-6a), or an error if none match.
+// GetVersion fetches a single version by ID directly -- used when an
+// operator picks a specific version/channel from the detail modal instead
+// of letting BestVersion auto-select one.
+func GetVersion(ctx context.Context, versionID string) (*Version, error) {
+	var v Version
+	if err := getJSON(ctx, apiBase+"/version/"+url.PathEscape(versionID), &v); err != nil {
+		return nil, fmt.Errorf("modrinth version: %w", err)
+	}
+	return &v, nil
+}
+
+// versionTypeRank orders Modrinth's version_type so a release always wins
+// over a beta, which always wins over an alpha -- BestVersion below prefers
+// the lowest rank it can find. An empty/unrecognized value (shouldn't
+// happen against the real API, but cheap to handle) sorts last rather than
+// being treated as equal to release.
+func versionTypeRank(t string) int {
+	switch t {
+	case "release":
+		return 0
+	case "beta":
+		return 1
+	case "alpha":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// BestVersion picks the newest *release* version of projectID compatible
+// with loader and mcVersion (FR-6a), falling back to the newest beta, and
+// then the newest alpha, only if no more-stable tier has a compatible
+// version at all -- picking whatever compatible version merely has the
+// most recent date_published (Modrinth's own listing order, see
+// ProjectVersions) used to mean a beta uploaded after the last release
+// would win just for being newer, even with a perfectly good release
+// available (confirmed: exactly this, installing a beta over an existing
+// release). versions is newest-first, so within a tier the first match
+// found is already that tier's newest; hitting a release immediately stops
+// the search since nothing later in the list could outrank it.
 func BestVersion(ctx context.Context, projectID, loader, mcVersion string) (*Version, error) {
 	versions, err := ProjectVersions(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range versions {
-		if containsFold(v.Loaders, loader) && contains(v.GameVersions, mcVersion) {
-			return &v, nil
+	var best *Version
+	for i := range versions {
+		v := &versions[i]
+		if !v.SupportsLoaderAndMC(loader, mcVersion) {
+			continue
+		}
+		if best == nil || versionTypeRank(v.VersionType) < versionTypeRank(best.VersionType) {
+			best = v
+		}
+		if v.VersionType == "release" {
+			break
 		}
 	}
-	return nil, fmt.Errorf("no version of project %s supports loader %q and Minecraft %q", projectID, loader, mcVersion)
+	if best == nil {
+		return nil, fmt.Errorf("no version of project %s supports loader %q and Minecraft %q", projectID, loader, mcVersion)
+	}
+	return best, nil
+}
+
+// SupportsLoaderAndMC reports whether v can actually run under loader and
+// mcVersion -- the same compatibility check BestVersion uses, exported so
+// callers that need to list every compatible version themselves (e.g. the
+// detail-modal endpoint, which shows the operator every matching
+// Release/Beta/Alpha instead of just the one BestVersion would pick) don't
+// have to duplicate it.
+func (v *Version) SupportsLoaderAndMC(loader, mcVersion string) bool {
+	return containsFold(v.Loaders, loader) && contains(v.GameVersions, mcVersion)
 }
 
 // PrimaryFile returns a version's primary downloadable file (falling back

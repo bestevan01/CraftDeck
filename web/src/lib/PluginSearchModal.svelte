@@ -9,9 +9,8 @@
 		results,
 		error,
 		searching,
-		installingProjectId,
 		onSearch,
-		onInstall
+		onSelectProject
 	}: {
 		open: boolean;
 		loaderLabel: string;
@@ -19,9 +18,8 @@
 		results: PluginSearchHit[];
 		error: string;
 		searching: boolean;
-		installingProjectId: string | null;
 		onSearch: (e: SubmitEvent) => void;
-		onInstall: (projectId: string) => void;
+		onSelectProject: (projectId: string) => void;
 	} = $props();
 
 	let pressedBackdrop = false;
@@ -76,26 +74,17 @@
 			{/if}
 			<div class="mt-2 flex-1 space-y-1.5 overflow-y-auto">
 				{#each results as hit (hit.project_id)}
-					<div
-						class="border-border flex items-center justify-between rounded-md border px-2 py-1.5 text-xs"
+					<button
+						type="button"
+						class="border-border hover:bg-background block w-full rounded-md border px-2 py-1.5 text-left text-xs"
+						onclick={() => onSelectProject(hit.project_id)}
 					>
-						<div class="min-w-0">
-							<span class="font-medium">{hit.title}</span>
-							<span class="text-muted-foreground ml-2">
-								{$t('pluginSearchModal.downloads', { count: hit.downloads.toLocaleString() })}
-							</span>
-							<p class="text-muted-foreground truncate">{hit.description}</p>
-						</div>
-						<button
-							class="border-border ml-2 shrink-0 rounded-md border px-2 py-1 text-xs"
-							disabled={installingProjectId === hit.project_id}
-							onclick={() => onInstall(hit.project_id)}
-						>
-							{installingProjectId === hit.project_id
-								? $t('pluginSearchModal.installing')
-								: $t('pluginSearchModal.install')}
-						</button>
-					</div>
+						<span class="font-medium underline">{hit.title}</span>
+						<span class="text-muted-foreground ml-2">
+							{$t('pluginSearchModal.downloads', { count: hit.downloads.toLocaleString() })}
+						</span>
+						<p class="text-muted-foreground truncate">{hit.description}</p>
+					</button>
 				{/each}
 			</div>
 		</div>
