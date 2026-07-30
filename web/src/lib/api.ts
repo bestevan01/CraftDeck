@@ -359,6 +359,10 @@ export type Plugin = {
 	// Every plugin ID that requires this one -- not just the first (see
 	// Plugin.DependentOf on the Go side).
 	dependent_of?: string[];
+	// Only ever set on the value an install request returns: Modrinth
+	// published no sha512 for that file, so it was downloaded without the
+	// integrity check.
+	integrity_unverified?: boolean;
 	created_at: string;
 };
 

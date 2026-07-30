@@ -6,8 +6,12 @@
 package api
 
 import (
+	"log"
 	"net"
 	"net/http"
+	"runtime/debug"
+	"sync"
+	"time"
 
 	"craftdeck/internal/auth"
 	"craftdeck/internal/backup"
@@ -60,6 +64,63 @@ type Server struct {
 	// updateSettings backs the update channel (stable/beta/canary) + check
 	// frequency settings (internal/update) -- see handlers_system.go.
 	updateSettings *update.Repository
+
+	// upstreamLimiter throttles the handlers that turn one CraftDeck request
+	// into an outbound call to somebody else's API -- see rateLimitUpstream.
+	upstreamLimiter *rateLimiter
+}
+
+// rateLimiter is a fixed-window counter: at most limit events per window,
+// counted globally rather than per client. Global is the right granularity
+// here because what's being protected isn't this daemon's CPU, it's
+// CraftDeck's standing with the upstream APIs it calls (Modrinth, the
+// loaders' fill APIs) -- they rate-limit by source IP, and every request
+// leaving a given Pi shares one.
+type rateLimiter struct {
+	mu       sync.Mutex
+	limit    int
+	window   time.Duration
+	count    int
+	windowAt time.Time
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	return &rateLimiter{limit: limit, window: window}
+}
+
+// allow reports whether one more event fits in the current window.
+func (l *rateLimiter) allow() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if now.Sub(l.windowAt) >= l.window {
+		l.windowAt = now
+		l.count = 0
+	}
+	if l.count >= l.limit {
+		return false
+	}
+	l.count++
+	return true
+}
+
+// rateLimitUpstream wraps a handler that makes an outbound third-party API
+// call. Without it, anything that can drive those endpoints in a loop (a
+// stuck frontend poll, a search box firing per keystroke, a script) spends
+// CraftDeck's shared upstream quota -- and once Modrinth starts refusing
+// requests from this IP, mod search and install break for the operator too.
+// The ceiling is set well above what the UI does on its own: a burst of
+// searches or opening several mod detail modals in a row stays comfortably
+// under it.
+func (s *Server) rateLimitUpstream(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.upstreamLimiter.allow() {
+			w.Header().Set("Retry-After", "10")
+			http.Error(w, "too many upstream requests in a short time -- wait a moment and try again", http.StatusTooManyRequests)
+			return
+		}
+		h(w, r)
+	}
 }
 
 func NewServer(
@@ -99,6 +160,11 @@ func NewServer(
 		hardwareSettings: hardwareSettings,
 		benchmarkRunner:  benchmarkRunner,
 		updateSettings:   updateSettings,
+		// 60 outbound calls per 10s. Far above anything the UI generates on
+		// its own (a search is one call, opening a mod's detail modal is two)
+		// while still stopping a runaway loop from burning through the
+		// upstream quota this Pi shares across every request it makes.
+		upstreamLimiter: newRateLimiter(60, 10*time.Second),
 	}
 }
 
@@ -119,7 +185,7 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /api/system/health", s.handleHealth)
 	mux.HandleFunc("GET /api/system/resources", s.handleSystemResources)
-	mux.HandleFunc("GET /api/system/version", s.handleCraftdeckVersion)
+	mux.HandleFunc("GET /api/system/version", s.rateLimitUpstream(s.handleCraftdeckVersion))
 	mux.HandleFunc("POST /api/system/update", s.handleUpdateCraftdeck)
 	mux.HandleFunc("GET /api/system/update-settings", s.handleGetUpdateSettings)
 	mux.HandleFunc("PUT /api/system/update-settings", s.handleSetUpdateSettings)
@@ -144,15 +210,15 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/2fa/disable", s.handleTOTPDisable)
 	mux.HandleFunc("POST /api/auth/2fa/backup-codes/regenerate", s.handleTOTPRegenerateBackupCodes)
 
-	mux.HandleFunc("GET /api/loaders/vanilla/versions", s.handleListVanillaVersions)
-	mux.HandleFunc("GET /api/loaders/paper/versions", s.handleListPaperVersions)
-	mux.HandleFunc("GET /api/loaders/purpur/versions", s.handleListPurpurVersions)
-	mux.HandleFunc("GET /api/loaders/folia/versions", s.handleListFoliaVersions)
-	mux.HandleFunc("GET /api/loaders/pufferfish/versions", s.handleListPufferfishVersions)
-	mux.HandleFunc("GET /api/loaders/leaf/versions", s.handleListLeafVersions)
-	mux.HandleFunc("GET /api/loaders/fabric/versions", s.handleListFabricVersions)
-	mux.HandleFunc("GET /api/loaders/neoforge/versions", s.handleListNeoForgeVersions)
-	mux.HandleFunc("GET /api/loaders/{loader}/builds", s.handleListLoaderBuilds)
+	mux.HandleFunc("GET /api/loaders/vanilla/versions", s.rateLimitUpstream(s.handleListVanillaVersions))
+	mux.HandleFunc("GET /api/loaders/paper/versions", s.rateLimitUpstream(s.handleListPaperVersions))
+	mux.HandleFunc("GET /api/loaders/purpur/versions", s.rateLimitUpstream(s.handleListPurpurVersions))
+	mux.HandleFunc("GET /api/loaders/folia/versions", s.rateLimitUpstream(s.handleListFoliaVersions))
+	mux.HandleFunc("GET /api/loaders/pufferfish/versions", s.rateLimitUpstream(s.handleListPufferfishVersions))
+	mux.HandleFunc("GET /api/loaders/leaf/versions", s.rateLimitUpstream(s.handleListLeafVersions))
+	mux.HandleFunc("GET /api/loaders/fabric/versions", s.rateLimitUpstream(s.handleListFabricVersions))
+	mux.HandleFunc("GET /api/loaders/neoforge/versions", s.rateLimitUpstream(s.handleListNeoForgeVersions))
+	mux.HandleFunc("GET /api/loaders/{loader}/builds", s.rateLimitUpstream(s.handleListLoaderBuilds))
 
 	mux.HandleFunc("GET /api/instances", s.handleListInstances)
 	mux.HandleFunc("POST /api/instances", s.handleCreateInstance)
@@ -181,8 +247,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/instances/{id}/world/export", s.handleExportWorld)
 	mux.HandleFunc("POST /api/instances/{id}/world/import", s.handleImportWorld)
 
-	mux.HandleFunc("GET /api/instances/{id}/plugins/search", s.handleSearchPlugins)
-	mux.HandleFunc("GET /api/instances/{id}/plugins/projects/{projectId}", s.handleGetPluginProject)
+	mux.HandleFunc("GET /api/instances/{id}/plugins/search", s.rateLimitUpstream(s.handleSearchPlugins))
+	mux.HandleFunc("GET /api/instances/{id}/plugins/projects/{projectId}", s.rateLimitUpstream(s.handleGetPluginProject))
 	mux.HandleFunc("GET /api/instances/{id}/plugins", s.handleListPlugins)
 	mux.HandleFunc("POST /api/instances/{id}/plugins", s.handleInstallPlugin)
 	mux.HandleFunc("POST /api/instances/{id}/plugins/upload", s.handleUploadPlugin)
@@ -216,12 +282,50 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/domain/settings", s.handleSetDomainSettings)
 	mux.HandleFunc("DELETE /api/domain/settings", s.handleDeleteDomainSettings)
 
-	mux.HandleFunc("GET /api/loaders/velocity/versions", s.handleListVelocityVersions)
+	mux.HandleFunc("GET /api/loaders/velocity/versions", s.rateLimitUpstream(s.handleListVelocityVersions))
 
 	mux.HandleFunc("GET /api/instances/{id}/console", s.handleConsoleWebSocket)
 	mux.HandleFunc("GET /api/instances/{id}/console/history", s.handleConsoleHistory)
 
-	return s.requireAuth(mux)
+	return recoverPanics(s.requireAuth(mux))
+}
+
+// recoverPanics turns a panic in any handler into a 500 for that one request
+// instead of taking the whole daemon down with it. Go's default behavior for
+// an unrecovered panic in a net/http handler goroutine is to kill the
+// process -- so a single nil dereference or out-of-range index anywhere
+// below (including in a response parsed from an external API like Modrinth
+// or Cloudflare) would take down the web UI, every instance's managed RCON
+// connection, and the background reconcilers all at once. The Minecraft
+// instances themselves survive (they're independent systemd units), but
+// there'd be nothing left to manage them with until systemd restarted
+// craftdeckd -- and a request that reliably triggers the panic would just
+// kill it again.
+//
+// http.ErrAbortHandler is deliberately re-panicked rather than swallowed:
+// net/http uses it as the documented way to abort a connection silently,
+// and the hijacked WebSocket console (handleConsoleWebSocket) relies on
+// that normal path.
+func recoverPanics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+			log.Printf("panic serving %s %s: %v\n%s", r.Method, r.URL.Path, rec, debug.Stack())
+			// Best-effort: if the handler already started writing (or
+			// hijacked the connection for a WebSocket), this header write is
+			// a no-op apart from a log line from net/http -- there's nothing
+			// better to do at that point, and the important part (not
+			// crashing the process) has already happened.
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // requireAuth gates every /api/ route except publicPaths behind a valid

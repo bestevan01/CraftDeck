@@ -23,7 +23,7 @@ func (s *Server) handleListBans(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.rconMgr.Execute(id, "banlist")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		s.httpError(w, err, http.StatusServiceUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string][]string{"players": parseBanlist(result)})
@@ -61,7 +61,7 @@ func (s *Server) handleListWhitelist(w http.ResponseWriter, r *http.Request) {
 
 	enabled, err := readServerPropertyBool(inst.WorkDir, "white-list")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !enabled {
@@ -71,7 +71,7 @@ func (s *Server) handleListWhitelist(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.rconMgr.Execute(id, "whitelist list")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		s.httpError(w, err, http.StatusServiceUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "players": parseColonSeparatedNames(result)})
@@ -159,7 +159,7 @@ func (s *Server) handleListOps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 

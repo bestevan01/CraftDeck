@@ -80,7 +80,7 @@ func (s *Server) handleExportWorld(w http.ResponseWriter, r *http.Request) {
 
 	tmpFile, err := os.CreateTemp("", "craftdeck-world-export-*.tar.gz")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	tmpPath := tmpFile.Name()
@@ -97,7 +97,7 @@ func (s *Server) handleExportWorld(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 	if _, err := backup.CreateFiltered(inst.WorkDir, tmpPath, include); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -140,14 +140,14 @@ func (s *Server) handleImportWorld(w http.ResponseWriter, r *http.Request) {
 
 	tmpFile, err := os.CreateTemp("", "craftdeck-world-import-*.tar.gz")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 	if _, err := io.Copy(tmpFile, file); err != nil {
 		tmpFile.Close()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	tmpFile.Close()
@@ -166,12 +166,12 @@ func (s *Server) handleImportWorld(w http.ResponseWriter, r *http.Request) {
 
 	for _, name := range worldDirNames(inst.WorkDir) {
 		if err := os.RemoveAll(filepath.Join(inst.WorkDir, name)); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
 	if err := backup.Restore(tmpPath, inst.WorkDir); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -180,11 +180,11 @@ func (s *Server) handleImportWorld(w http.ResponseWriter, r *http.Request) {
 	// the next start (running as that user) can actually read/write them.
 	username, err := process.EnsureInstanceUser(ctx, inst.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := process.ChownRecursive(ctx, inst.WorkDir, username); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 

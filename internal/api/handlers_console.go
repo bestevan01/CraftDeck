@@ -160,7 +160,7 @@ func (s *Server) handleConsoleHistory(w http.ResponseWriter, r *http.Request) {
 	logsDir := filepath.Join(inst.WorkDir, "logs")
 	entries, hasMore, err := gamelog.ReadHistory(logsDir, before, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 

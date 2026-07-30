@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -18,7 +17,7 @@ import (
 func (s *Server) handleGetHardware(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.hardwareSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
@@ -32,16 +31,16 @@ func (s *Server) handleGetHardware(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRedetectCooler(w http.ResponseWriter, r *http.Request) {
 	detected, err := hardware.DetectActiveCooler(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.hardwareSettings.SetCoolerDetected(r.Context(), detected); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	cfg, err := s.hardwareSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
@@ -65,7 +64,7 @@ type setOverclockRequest struct {
 func (s *Server) handleSetOverclock(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.hardwareSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !cfg.CoolerDetected {
@@ -74,7 +73,7 @@ func (s *Server) handleSetOverclock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req setOverclockRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -91,16 +90,16 @@ func (s *Server) handleSetOverclock(w http.ResponseWriter, r *http.Request) {
 
 	values := hardware.Values{Enabled: req.Enabled, Preset: req.Preset, ArmFreqMHz: armFreq, OverVoltageDeltaUV: overVoltageDelta}
 	if err := hardware.ApplyConfig(values); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	if err := s.hardwareSettings.SetOverclock(r.Context(), req.Enabled, req.Preset, armFreq, overVoltageDelta); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	updated, err := s.hardwareSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -151,7 +150,7 @@ func (s *Server) handleStartBenchmark(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		s.httpError(w, err, http.StatusConflict)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)

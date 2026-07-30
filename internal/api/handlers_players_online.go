@@ -23,7 +23,7 @@ func (s *Server) handleOnlinePlayers(w http.ResponseWriter, r *http.Request) {
 
 	status, err := mcping.Ping(r.Context(), fmt.Sprintf("127.0.0.1:%d", inst.GamePort), 3*time.Second)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		s.httpError(w, err, http.StatusServiceUnavailable)
 		return
 	}
 

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,7 +15,7 @@ import (
 func (s *Server) handleGetDomainSettings(w http.ResponseWriter, r *http.Request) {
 	config, err := s.domains.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if config == nil {
@@ -61,7 +60,7 @@ const mainDomainProvider = "cloudflare"
 func (s *Server) handleSetDomainSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var req setDomainSettingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -131,7 +130,7 @@ func (s *Server) handleSetDomainSettings(w http.ResponseWriter, r *http.Request)
 
 	config, err := s.domains.Set(ctx, kind, provider, hostname, mode, tokenEncrypted, zoneID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -176,7 +175,7 @@ func (s *Server) handleSetDomainSettings(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleDeleteDomainSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := s.domains.Clear(ctx); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.ReconcileProxyMode(ctx); err != nil {

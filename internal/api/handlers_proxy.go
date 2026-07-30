@@ -4,12 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"craftdeck/internal/ddns"
@@ -708,7 +708,7 @@ func (s *Server) handleListProxyBackends(w http.ResponseWriter, r *http.Request)
 	}
 	backends, err := s.instances.ListProxyBackends(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, backends)
@@ -737,7 +737,7 @@ func (s *Server) handleSetProxyBackends(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req setProxyBackendsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -752,13 +752,13 @@ func (s *Server) handleSetProxyBackends(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.applyProxyBackends(ctx, proxy, backends); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 
 	updated, err := s.instances.ListProxyBackends(ctx, id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -783,7 +783,7 @@ func (s *Server) handleGetForwardingSecret(w http.ResponseWriter, r *http.Reques
 	}
 	secret, err := os.ReadFile(filepath.Join(inst.WorkDir, "forwarding.secret"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"secret": strings.TrimSpace(string(secret))})
@@ -812,7 +812,7 @@ func (s *Server) handleGetServerSubdomain(w http.ResponseWriter, r *http.Request
 	id := r.PathValue("id")
 	forcedHost, registered, err := s.serverSubdomain(ctx, id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	resp := serverSubdomainResponse{Registered: registered, ForcedHost: forcedHost}
@@ -828,6 +828,55 @@ type setServerSubdomainRequest struct {
 	ForcedHost string `json:"forced_host"`
 }
 
+// dnsLabelRE matches a single DNS label per RFC 1035/1123: lowercase
+// alphanumerics and hyphens, not starting or ending with a hyphen, 1-63
+// characters.
+var dnsLabelRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// validateForcedHost checks a subdomain the operator typed before it reaches
+// either of the two places it ends up: a Cloudflare DNS record name (see
+// SyncMainDomainDNS) and a forced-host key in velocity.toml (see
+// writeVelocityConfig). Nothing downstream validated it before, so a value
+// with whitespace, control characters, a wildcard, or absurd length would
+// either be rejected by Cloudflare mid-sync (leaving the assignment saved
+// but unreachable, and any previous record dangling) or land in
+// velocity.toml as something Velocity refuses to parse -- which takes the
+// proxy down on its next start, and with it every server sitting behind it.
+//
+// The frontend submits the full FQDN (label + "." + the registered main
+// domain, see the instance page's saveSubdomain), so this validates the
+// whole name and confirms it's actually under the domain CraftDeck manages
+// -- a name outside that zone could never get a working DNS record anyway,
+// and asking Cloudflare to create one is a request for a zone this token
+// isn't scoped to.
+func (s *Server) validateForcedHost(ctx context.Context, forcedHost string) error {
+	if forcedHost != strings.TrimSpace(forcedHost) {
+		return fmt.Errorf("subdomain must not have leading or trailing whitespace")
+	}
+	if len(forcedHost) > 253 {
+		return fmt.Errorf("subdomain is too long (max 253 characters)")
+	}
+	config, err := s.domains.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if config == nil || config.Kind != ddns.KindMainDomain || config.Hostname == "" {
+		return fmt.Errorf("no owned domain is registered, so a subdomain can't be assigned")
+	}
+	suffix := "." + config.Hostname
+	if !strings.HasSuffix(forcedHost, suffix) {
+		return fmt.Errorf("subdomain must end in %s", suffix)
+	}
+	label := strings.TrimSuffix(forcedHost, suffix)
+	// Only a single label is supported: a deeper name (a.b.example.com)
+	// wouldn't be covered by the wildcard TLS certificate CraftDeck obtains
+	// for the domain, so it would resolve but fail to connect over HTTPS.
+	if !dnsLabelRE.MatchString(label) {
+		return fmt.Errorf("subdomain must be one label of lowercase letters, digits, or hyphens (not starting or ending with a hyphen)")
+	}
+	return nil
+}
+
 // handleSetServerSubdomain updates the subdomain for a server already
 // sitting behind the proxy (see addServerToProxy -- every Paper server not
 // explicitly opted out gets registered there at creation).
@@ -835,7 +884,7 @@ func (s *Server) handleSetServerSubdomain(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	id := r.PathValue("id")
 	var req setServerSubdomainRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -843,13 +892,17 @@ func (s *Server) handleSetServerSubdomain(w http.ResponseWriter, r *http.Request
 		http.Error(w, "forced_host must not be empty", http.StatusBadRequest)
 		return
 	}
+	if err := s.validateForcedHost(ctx, req.ForcedHost); err != nil {
+		s.httpError(w, err, http.StatusBadRequest)
+		return
+	}
 	if err := s.setServerSubdomain(ctx, id, req.ForcedHost); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	forcedHost, registered, err := s.serverSubdomain(ctx, id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	resp := serverSubdomainResponse{Registered: registered, ForcedHost: forcedHost}
@@ -887,7 +940,7 @@ func (s *Server) handleGetProxyStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	proxy, err := s.findProxy(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if proxy == nil {
@@ -897,7 +950,7 @@ func (s *Server) handleGetProxyStatus(w http.ResponseWriter, r *http.Request) {
 
 	latest, err := loader.FetchLatestBuildableVelocityVersion(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, proxyStatusResponse{
@@ -923,7 +976,7 @@ func (s *Server) handleUpgradeProxy(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	proxy, err := s.findProxy(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if proxy == nil {
@@ -953,16 +1006,16 @@ func (s *Server) handleUpgradeProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	username, err := process.EnsureInstanceUser(ctx, proxy.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := process.ChownRecursive(ctx, proxy.WorkDir, username); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	javaMajor := proxyJavaMajor(ctx, latest)
 	if err := s.instances.UpdateVersion(ctx, proxy.ID, latest, javaMajor); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	proxy.MCVersion = latest
@@ -1050,7 +1103,7 @@ func (s *Server) handleRegisterBehindProxy(w http.ResponseWriter, r *http.Reques
 
 	secret, err := s.registerServerBehindProxyCore(ctx, inst)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, registerProxyResponse{ForwardingSecret: secret})
@@ -1073,7 +1126,7 @@ func (s *Server) handleUnregisterFromProxy(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := s.unregisterServerFromProxyCore(ctx, inst); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

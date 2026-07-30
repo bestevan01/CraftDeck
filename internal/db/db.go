@@ -14,7 +14,14 @@ import (
 )
 
 func Open(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
+	// busy_timeout: WAL lets readers and one writer coexist, but two writers
+	// still can't overlap -- and without a timeout SQLite fails such a
+	// collision instantly with "database is locked" rather than waiting.
+	// craftdeckd has several independent writers (HTTP handlers, the DDNS
+	// reconciler, the daily log-retention sweep, startup reconciliation), so
+	// brief overlaps are normal; 5s of waiting turns them into a slight delay
+	// instead of a spurious error surfaced to the operator.
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}

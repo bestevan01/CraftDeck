@@ -3,7 +3,6 @@ package api
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -70,7 +69,7 @@ func (s *Server) handleCraftdeckVersion(w http.ResponseWriter, r *http.Request) 
 
 	settings, err := s.updateSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -120,7 +119,7 @@ type updateCraftdeckRequest struct {
 // succeeds again.
 func (s *Server) handleUpdateCraftdeck(w http.ResponseWriter, r *http.Request) {
 	var req updateCraftdeckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TargetVersion == "" {
+	if err := decodeJSONBody(r, &req); err != nil || req.TargetVersion == "" {
 		http.Error(w, "target_version is required", http.StatusBadRequest)
 		return
 	}
@@ -150,7 +149,7 @@ func (s *Server) handleUpdateCraftdeck(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.updateSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
@@ -168,7 +167,7 @@ type setUpdateSettingsRequest struct {
 // it.
 func (s *Server) handleSetUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req setUpdateSettingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -189,16 +188,16 @@ func (s *Server) handleSetUpdateSettings(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := update.ApplySourcesList(channel); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.updateSettings.SetChannelAndFrequency(r.Context(), channel, freq); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	settings, err := s.updateSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
@@ -259,17 +258,17 @@ type systemResources struct {
 func (s *Server) handleSystemResources(w http.ResponseWriter, r *http.Request) {
 	cpuPercent, err := cpuUsagePercent(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	totalMemMB, usedMemMB, err := memoryUsageMB()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	totalDiskMB, usedDiskMB, err := diskUsageMB(s.dataDir)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -447,7 +446,7 @@ func diskUsageMB(path string) (totalMB, usedMB int, err error) {
 func (s *Server) handleGetSwap(w http.ResponseWriter, r *http.Request) {
 	info, err := swap.Status(r.Context(), s.dataDir)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -463,7 +462,7 @@ type setSwapRequest struct {
 // filling the disk (see swap.Set).
 func (s *Server) handleSetSwap(w http.ResponseWriter, r *http.Request) {
 	var req setSwapRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -472,12 +471,12 @@ func (s *Server) handleSetSwap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := swap.Set(r.Context(), s.dataDir, req.SizeMB); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	info, err := swap.Status(r.Context(), s.dataDir)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -486,7 +485,7 @@ func (s *Server) handleSetSwap(w http.ResponseWriter, r *http.Request) {
 // handleDeleteSwap turns off and removes CraftDeck's swap file entirely.
 func (s *Server) handleDeleteSwap(w http.ResponseWriter, r *http.Request) {
 	if err := swap.Disable(r.Context(), s.dataDir); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

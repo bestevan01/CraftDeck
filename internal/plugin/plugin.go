@@ -38,6 +38,13 @@ type Plugin struct {
 	// API being needed by half a dozen mods is the common case) needs all
 	// of them, not just the first.
 	DependentOf []string `json:"dependent_of,omitempty"`
+	// IntegrityUnverified is set on the value returned straight from an
+	// install when Modrinth published no sha512 for the file, so the
+	// download couldn't be checked against a known hash (see
+	// installModrinthPlugin). Not a DB column and never set by a read --
+	// it's a one-time notice for the response that install request gets, so
+	// the operator knows this particular file went in unverified.
+	IntegrityUnverified bool `json:"integrity_unverified,omitempty"`
 }
 
 // DiskFilename is the plugin's actual filename on disk right now --

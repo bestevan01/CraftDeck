@@ -29,7 +29,7 @@ func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
 
 	list, err := s.backups.ListByInstance(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -56,7 +56,7 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 
 	dir := s.backupsDir(id)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -66,14 +66,14 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 
 	size, err := backup.Create(inst.WorkDir, destPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
 	b := &backup.Backup{ID: backupID, InstanceID: id, Filename: filename, SizeBytes: size}
 	if err := s.backups.Create(ctx, b); err != nil {
 		os.Remove(destPath)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusCreated, b)
@@ -111,11 +111,11 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.MkdirAll(inst.WorkDir, 0o750); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := backup.Restore(archivePath, inst.WorkDir); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -124,11 +124,11 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 	// the next start (running as that user) can actually read/write them.
 	username, err := process.EnsureInstanceUser(ctx, inst.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := process.ChownRecursive(ctx, inst.WorkDir, username); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -148,11 +148,11 @@ func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
 
 	archivePath := filepath.Join(s.backupsDir(id), b.Filename)
 	if err := os.Remove(archivePath); err != nil && !os.IsNotExist(err) {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.backups.Delete(ctx, backupID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

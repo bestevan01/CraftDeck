@@ -157,10 +157,20 @@ func (r *Repository) DeleteSession(ctx context.Context, sessionID string) error 
 	return err
 }
 
-// UpdatePasswordHash changes a user's stored password hash. Existing
-// sessions aren't invalidated -- the sessions table only references
-// user_id, not the password, so a password change doesn't need to force a
-// re-login on this or other already-logged-in browsers.
+// DeleteSessionsForUser revokes every session belonging to userID. Called
+// after a password change (see handleChangePassword) so that changing the
+// password is actually an effective response to a suspected session
+// hijack -- without it, a stolen cookie stays valid for the rest of its
+// sessionTTL no matter what the operator does about the password.
+func (r *Repository) DeleteSessionsForUser(ctx context.Context, userID int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	return err
+}
+
+// UpdatePasswordHash changes a user's stored password hash. Callers are
+// expected to follow this with DeleteSessionsForUser (and issue a fresh
+// session for whoever made the change) -- the sessions table only
+// references user_id, so nothing here invalidates them on its own.
 func (r *Repository) UpdatePasswordHash(ctx context.Context, userID int64, newHash string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, newHash, userID)
 	return err

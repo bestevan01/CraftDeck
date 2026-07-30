@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -221,7 +220,7 @@ func (s *Server) handleSetServerSettings(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req map[string]string
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -265,7 +264,7 @@ func (s *Server) handleSetServerSettings(w http.ResponseWriter, r *http.Request)
 	}
 	newContent := applyProperties(string(content), updates)
 	if err := os.WriteFile(propsPath, []byte(newContent), 0o640); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	chownInstanceFile(ctx, inst.ID, propsPath)

@@ -124,18 +124,27 @@ func (mc *managedConn) execute(command string) (string, error) {
 // or a replacement StartMaintaining call), storing the live client for
 // execute() to use and clearing it whenever the connection is found dead.
 func (mc *managedConn) maintain(ctx context.Context, addr, password string, onConnect func()) {
+	// Closing on the way out happens here rather than at each individual
+	// return: this function returns from several places once ctx is
+	// cancelled (including the idle loop at the bottom), and the ones that
+	// weren't doing this cleanup left a live socket behind every time an
+	// instance was stopped or restarted -- they accumulate for as long as
+	// the daemon runs.
+	defer func() {
+		mc.mu.Lock()
+		if mc.client != nil {
+			mc.client.Close()
+			mc.client = nil
+		}
+		mc.mu.Unlock()
+	}()
+
 	backoff := 1 * time.Second
 	const maxBackoff = 15 * time.Second
 
 	for {
 		select {
 		case <-ctx.Done():
-			mc.mu.Lock()
-			if mc.client != nil {
-				mc.client.Close()
-				mc.client = nil
-			}
-			mc.mu.Unlock()
 			return
 		default:
 		}

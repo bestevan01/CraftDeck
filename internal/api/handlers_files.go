@@ -71,7 +71,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	dirPath, err := resolveInstancePath(inst, r.URL.Query().Get("path"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	relDir := strings.TrimPrefix(strings.TrimPrefix(dirPath, inst.WorkDir), string(filepath.Separator))
@@ -128,7 +128,7 @@ func (s *Server) handleGetFileContent(w http.ResponseWriter, r *http.Request) {
 	}
 	fullPath, err := resolveInstancePath(inst, r.URL.Query().Get("path"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	info, err := os.Stat(fullPath)
@@ -141,7 +141,7 @@ func (s *Server) handleGetFileContent(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(fullPath, ".gz") {
 		f, err := os.Open(fullPath)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 		defer f.Close()
@@ -167,7 +167,7 @@ func (s *Server) handleGetFileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		content, err = os.ReadFile(fullPath)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -199,7 +199,7 @@ func (s *Server) handleSetFileContent(w http.ResponseWriter, r *http.Request) {
 	}
 	fullPath, err := resolveInstancePath(inst, r.URL.Query().Get("path"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	if strings.HasSuffix(fullPath, ".gz") {
@@ -225,7 +225,7 @@ func (s *Server) handleSetFileContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.WriteFile(fullPath, []byte(req.Content), 0o640); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	chownInstanceFile(ctx, inst.ID, fullPath)
@@ -243,7 +243,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	fullPath, err := resolveInstancePath(inst, r.URL.Query().Get("path"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	info, err := os.Stat(fullPath)
@@ -315,7 +315,7 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	dirPath, err := resolveInstancePath(inst, r.URL.Query().Get("path"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	if info, err := os.Stat(dirPath); err != nil || !info.IsDir() {
@@ -350,18 +350,18 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 
 	out, err := os.Create(destPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if _, err := io.Copy(out, file); err != nil {
 		out.Close()
 		os.Remove(destPath)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := out.Close(); err != nil {
 		os.Remove(destPath)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	chownInstanceFile(ctx, inst.ID, destPath)
@@ -390,7 +390,7 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req renameFileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -413,7 +413,7 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.Rename(fromPath, toPath); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	chownInstanceFile(ctx, inst.ID, toPath)
@@ -432,7 +432,7 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	fullPath, err := resolveInstancePath(inst, r.URL.Query().Get("path"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	if fullPath == inst.WorkDir {
@@ -440,7 +440,7 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := os.RemoveAll(fullPath); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

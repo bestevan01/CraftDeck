@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"craftdeck/internal/network"
@@ -31,7 +30,7 @@ func (s *Server) handleGetNetworkAddresses(w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	localIP, err := network.LocalIP(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	resp := networkAddressesResponse{LocalIP: localIP}
@@ -48,7 +47,7 @@ func (s *Server) handleGetNetworkSettings(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	settings, err := s.networkSettings.Get(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	resp := networkSettingsResponse{WANEnabled: settings.WANEnabled}
@@ -76,7 +75,7 @@ type setNetworkSettingsRequest struct {
 func (s *Server) handleSetNetworkSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var req setNetworkSettingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -98,12 +97,12 @@ func (s *Server) handleSetNetworkSettings(w http.ResponseWriter, r *http.Request
 	if !req.WANEnabled {
 		if mapping, err := s.portMappings.GetWebMapping(ctx); err == nil {
 			if err := s.netManager.Remove(ctx, mapping); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				s.httpError(w, err, http.StatusInternalServerError)
 				return
 			}
 		}
 		if err := s.networkSettings.SetWANEnabled(ctx, false); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 		if err := s.ReconcileGamePorts(ctx); err != nil {
@@ -121,11 +120,11 @@ func (s *Server) handleSetNetworkSettings(w http.ResponseWriter, r *http.Request
 	}
 	mapping, manual, err := s.netManager.Ensure(ctx, nil, s.webUIPort, "tcp", "CraftDeck Web UI")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.networkSettings.SetWANEnabled(ctx, true); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.ReconcileGamePorts(ctx); err != nil {
@@ -145,7 +144,7 @@ func (s *Server) handleSetNetworkSettings(w http.ResponseWriter, r *http.Request
 func (s *Server) handleListPortMappings(w http.ResponseWriter, r *http.Request) {
 	list, err := s.portMappings.List(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -168,12 +167,12 @@ func (s *Server) handleDeletePortMapping(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.netManager.Remove(ctx, mapping); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if mapping.InstanceID == nil {
 		if err := s.networkSettings.SetWANEnabled(ctx, false); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}

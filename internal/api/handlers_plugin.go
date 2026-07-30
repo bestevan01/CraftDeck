@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha512"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -100,7 +99,7 @@ func (s *Server) handleSearchPlugins(w http.ResponseWriter, r *http.Request) {
 
 	hits, err := modrinth.Search(r.Context(), r.URL.Query().Get("query"), modrinthProjectType(inst.Loader), inst.Loader, inst.MCVersion)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, hits)
@@ -132,12 +131,12 @@ func (s *Server) handleGetPluginProject(w http.ResponseWriter, r *http.Request) 
 
 	project, err := modrinth.GetProject(ctx, projectID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	all, err := modrinth.ProjectVersions(ctx, projectID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	compatible := make([]modrinth.Version, 0, len(all))
@@ -160,12 +159,12 @@ func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.plugins.ListByInstance(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	edges, err := s.plugins.ListDependencyEdges(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	// Every parent a shared dependency has, not just the one ParentPluginID
@@ -203,14 +202,14 @@ func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req installPluginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ProjectID == "" {
+	if err := decodeJSONBody(r, &req); err != nil || req.ProjectID == "" {
 		http.Error(w, "project_id is required", http.StatusBadRequest)
 		return
 	}
 
 	installed, err := s.installModrinthPlugin(ctx, inst, req.ProjectID, "", req.VersionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusCreated, installed)
@@ -293,6 +292,16 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 	chownInstanceFile(ctx, inst.ID, pluginsDir)
 	destPath := filepath.Join(pluginsDir, file.Filename)
 	expectedSHA512 := file.Hashes["sha512"]
+	// Modrinth publishes a sha512 for essentially every file, so an empty
+	// one means something unusual -- either an old/odd upload or a response
+	// that isn't what we think it is. Installing anyway is the right call
+	// (refusing would block a legitimate mod over Modrinth's own metadata
+	// gap, and the download is HTTPS either way), but silently skipping the
+	// one integrity check FR-6d asks for shouldn't be invisible: it's logged
+	// here and surfaced to the operator via the install response's warning.
+	if expectedSHA512 == "" {
+		log.Printf("install %s (%s): Modrinth published no sha512, installing without integrity verification", projectID, file.Filename)
+	}
 	if err := downloadAndVerifySHA512(ctx, file.URL, expectedSHA512, destPath); err != nil {
 		return nil, fmt.Errorf("download %s: %w", file.Filename, err)
 	}
@@ -317,6 +326,9 @@ func (s *Server) installModrinthPlugin(ctx context.Context, inst *instance.Insta
 		os.Remove(destPath)
 		return nil, err
 	}
+	// Set after Create so it can't be mistaken for a persisted column --
+	// this only rides along on the value this call returns.
+	p.IntegrityUnverified = expectedSHA512 == ""
 	if parentID != "" {
 		if err := s.plugins.AddDependency(ctx, parentID, p.ID); err != nil {
 			log.Printf("record dependency edge %s -> %s (continuing): %v", parentID, p.ID, err)
@@ -375,7 +387,7 @@ func (s *Server) handleUploadPlugin(w http.ResponseWriter, r *http.Request) {
 	}
 	validated, err := requireJarMagicBytes(file)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 	// filepath.Base, not the raw (fully attacker-controlled) header.Filename
@@ -386,7 +398,7 @@ func (s *Server) handleUploadPlugin(w http.ResponseWriter, r *http.Request) {
 
 	pluginsDir := filepath.Join(inst.WorkDir, pluginsDirName(inst.Loader))
 	if err := os.MkdirAll(pluginsDir, 0o750); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	// See installModrinthPlugin's identical call for why this is needed --
@@ -397,19 +409,19 @@ func (s *Server) handleUploadPlugin(w http.ResponseWriter, r *http.Request) {
 
 	out, err := os.Create(destPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	hasher := sha512.New()
 	if _, err := io.Copy(io.MultiWriter(out, hasher), validated); err != nil {
 		out.Close()
 		os.Remove(destPath)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := out.Close(); err != nil {
 		os.Remove(destPath)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	chownInstanceFile(ctx, inst.ID, destPath)
@@ -424,7 +436,7 @@ func (s *Server) handleUploadPlugin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.plugins.Create(ctx, p); err != nil {
 		os.Remove(destPath)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -455,7 +467,7 @@ func (s *Server) handleSetPluginEnabled(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req setPluginEnabledRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -469,11 +481,11 @@ func (s *Server) handleSetPluginEnabled(w http.ResponseWriter, r *http.Request) 
 	p.Enabled = req.Enabled
 	newPath := filepath.Join(pluginsDir, p.DiskFilename())
 	if err := os.Rename(oldPath, newPath); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.plugins.SetEnabled(ctx, pluginID, req.Enabled); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -504,7 +516,7 @@ func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
 
 	cascadeIDs, err := s.deletePluginCascade(ctx, pluginID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	for _, delID := range cascadeIDs {
@@ -517,11 +529,11 @@ func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
 		}
 		path := filepath.Join(inst.WorkDir, pluginsDirName(inst.Loader), target.DiskFilename())
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 		if err := s.plugins.Delete(ctx, delID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}

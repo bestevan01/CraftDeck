@@ -1061,9 +1061,18 @@
 		installingVersionId = versionId;
 		pluginInstallError = '';
 		try {
-			await api.installPlugin(id, pluginDetailProject.id, versionId);
+			const installed = await api.installPlugin(id, pluginDetailProject.id, versionId);
 			await refreshPlugins();
 			showPluginDetailModal = false;
+			// Modrinth normally publishes a sha512 for every file; when it
+			// doesn't, the download went in without the integrity check
+			// (see installModrinthPlugin). Installing anyway is intended --
+			// this just makes sure it isn't silent.
+			pluginsError = installed.integrity_unverified
+				? $t('instanceDetailPage.plugins.integrityUnverified', {
+						filename: installed.title || installed.filename
+					})
+				: '';
 		} catch (err) {
 			pluginInstallError = err instanceof Error ? err.message : String(err);
 		} finally {
@@ -1252,13 +1261,23 @@
 		}
 	}
 
+	// Same rule the backend enforces (validateForcedHost in
+	// handlers_proxy.go) -- checked here too so a typo is caught before a
+	// round trip, not after Cloudflare has already been asked to create a
+	// record for it. The backend check is the one that actually matters;
+	// this is only for the error message being immediate.
+	const dnsLabelRE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
 	async function saveSubdomain() {
+		const label = subdomainInput.trim();
+		if (!dnsLabelRE.test(label)) {
+			subdomainError = $t('instanceDetailPage.proxy.invalidSubdomain');
+			return;
+		}
 		savingSubdomain = true;
 		subdomainError = '';
 		try {
-			const fullHost = domainSuffix
-				? `${subdomainInput.trim()}${domainSuffix}`
-				: subdomainInput.trim();
+			const fullHost = domainSuffix ? `${label}${domainSuffix}` : label;
 			subdomain = await api.setServerSubdomain(id, fullHost);
 			subdomainInput = labelFromForcedHost(subdomain.forced_host);
 		} catch (err) {

@@ -33,7 +33,7 @@ func (s *Server) handleListLoaderBuilds(w http.ResponseWriter, r *http.Request) 
 	}
 	builds, err := lister.ListBuilds(r.Context(), mcVersion)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, builds)
@@ -45,7 +45,7 @@ func (s *Server) handleListLoaderBuilds(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleListVanillaVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchVanillaVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -56,7 +56,7 @@ func (s *Server) handleListVanillaVersions(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleListPaperVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchPaperVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -67,7 +67,7 @@ func (s *Server) handleListPaperVersions(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleListVelocityVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchVelocityVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -78,7 +78,7 @@ func (s *Server) handleListVelocityVersions(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleListPurpurVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchPurpurVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -89,7 +89,7 @@ func (s *Server) handleListPurpurVersions(w http.ResponseWriter, r *http.Request
 func (s *Server) handleListFoliaVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchFoliaVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -102,7 +102,7 @@ func (s *Server) handleListFoliaVersions(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleListPufferfishVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchPufferfishVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -113,7 +113,7 @@ func (s *Server) handleListPufferfishVersions(w http.ResponseWriter, r *http.Req
 func (s *Server) handleListLeafVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchLeafVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -124,7 +124,7 @@ func (s *Server) handleListLeafVersions(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleListFabricVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchFabricVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)
@@ -135,7 +135,7 @@ func (s *Server) handleListFabricVersions(w http.ResponseWriter, r *http.Request
 func (s *Server) handleListNeoForgeVersions(w http.ResponseWriter, r *http.Request) {
 	versions, err := loader.FetchNeoForgeVersions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.httpError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, http.StatusOK, versions)

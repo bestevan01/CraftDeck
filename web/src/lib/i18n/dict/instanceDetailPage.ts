@@ -24,8 +24,12 @@ export const messages = {
 			'이 백업으로 복원하면 현재 월드/설정이 백업 시점 상태로 전부 대체됩니다. 계속할까요?',
 		'instanceDetailPage.backups.deleteConfirm': '이 백업을 삭제할까요?',
 		'instanceDetailPage.plugins.deleteConfirm': '{filename}을(를) 삭제할까요?',
+		'instanceDetailPage.plugins.integrityUnverified':
+			'{filename}은(는) Modrinth가 해시를 제공하지 않아 무결성 검증 없이 설치되었습니다.',
 		'instanceDetailPage.proxy.unregisterConfirm':
 			'이 서버를 프록시에서 빼고 독립 노출로 전환할까요? 서버를 재시작해야 실제로 적용됩니다.',
+		'instanceDetailPage.proxy.invalidSubdomain':
+			'서브도메인은 영소문자, 숫자, 하이픈만 쓸 수 있고 하이픈으로 시작하거나 끝날 수 없습니다 (최대 63자).',
 		'instanceDetailPage.world.importSuccess':
 			'가져오기 완료 (감지된 버전: {version}). 서버를 시작하면 반영됩니다.',
 		'instanceDetailPage.world.unknownVersion': '알 수 없음',
@@ -58,8 +62,12 @@ export const messages = {
 			"Restoring this backup will replace the current world/settings entirely with the backup's state. Continue?",
 		'instanceDetailPage.backups.deleteConfirm': 'Delete this backup?',
 		'instanceDetailPage.plugins.deleteConfirm': 'Delete {filename}?',
+		'instanceDetailPage.plugins.integrityUnverified':
+			'{filename} was installed without integrity verification -- Modrinth published no hash for it.',
 		'instanceDetailPage.proxy.unregisterConfirm':
 			'Remove this server from the proxy and switch to standalone exposure? A restart is required for this to take effect.',
+		'instanceDetailPage.proxy.invalidSubdomain':
+			'A subdomain can only use lowercase letters, digits, and hyphens, and cannot start or end with a hyphen (max 63 characters).',
 		'instanceDetailPage.world.importSuccess':
 			'Import complete (detected version: {version}). Changes take effect when the server starts.',
 		'instanceDetailPage.world.unknownVersion': 'Unknown',

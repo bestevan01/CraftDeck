@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -67,7 +66,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	count, err := s.users.CountUsers(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	user, authenticated := s.currentUser(r)
@@ -108,7 +107,7 @@ type credentialsRequest struct {
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	count, err := s.users.CountUsers(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if count > 0 {
@@ -117,7 +116,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req credentialsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -128,18 +127,18 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	userID, err := s.users.CreateUser(r.Context(), req.Username, hash)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
 	sessionID, expiresAt, err := s.users.CreateSession(r.Context(), userID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	setSessionCookie(w, r, sessionID, expiresAt)
@@ -166,7 +165,7 @@ func (s *Server) loginLockoutPolicy(ctx context.Context) (maxAttempts int, locko
 // outright once it's reached), and a correct one clears the counter.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req credentialsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -234,7 +233,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	sessionID, expiresAt, err := s.users.CreateSession(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	setSessionCookie(w, r, sessionID, expiresAt)
@@ -253,7 +252,7 @@ type changePasswordRequest struct {
 // same way whether or not the caller currently has a session cookie.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req changePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -270,13 +269,34 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.users.UpdatePasswordHash(r.Context(), user.ID, hash); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	// Changing the password is the natural response to "someone may have my
+	// session" -- so it has to actually revoke those sessions. Every one of
+	// this user's sessions goes, including the caller's own; a fresh one is
+	// then issued for the browser that made the change so the operator
+	// isn't logged out of the tab they're standing in.
+	if err := s.users.DeleteSessionsForUser(r.Context(), user.ID); err != nil {
+		s.httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	sessionID, expiresAt, err := s.users.CreateSession(r.Context(), user.ID)
+	if err != nil {
+		// The password change itself already succeeded and every old session
+		// is gone -- the safe outcome here is "you're logged out", not a
+		// rollback, so report success and let the frontend's normal 401
+		// handling send them to the login page.
+		log.Printf("change password: issue replacement session (operator must log in again): %v", err)
+		clearSessionCookie(w, r)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	setSessionCookie(w, r, sessionID, expiresAt)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -325,17 +345,17 @@ func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 
 	secret, otpauthURL, err := auth.GenerateTOTPSecret(user.Username, "CraftDeck")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.users.SetPendingTOTPSecret(r.Context(), user.ID, secret); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
 	png, err := qrcode.Encode(otpauthURL, qrcode.Medium, 256)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
@@ -374,7 +394,7 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req totpVerifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -385,20 +405,20 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 
 	backupCodes, err := auth.GenerateBackupCodes(8)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	hashes := make([]string, len(backupCodes))
 	for i, code := range backupCodes {
 		hash, err := auth.HashPassword(code)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 		hashes[i] = hash
 	}
 	if err := s.users.EnableTOTP(r.Context(), user.ID, hashes); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -431,7 +451,7 @@ func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req totpDisableRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -442,7 +462,7 @@ func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 
 	settings, err := s.networkSettings.Get(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if settings.WANEnabled {
@@ -451,7 +471,7 @@ func (s *Server) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.users.DisableTOTP(r.Context(), user.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -474,20 +494,20 @@ func (s *Server) handleTOTPRegenerateBackupCodes(w http.ResponseWriter, r *http.
 
 	backupCodes, err := auth.GenerateBackupCodes(8)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	hashes := make([]string, len(backupCodes))
 	for i, code := range backupCodes {
 		hash, err := auth.HashPassword(code)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 		hashes[i] = hash
 	}
 	if err := s.users.SetBackupCodeHashes(r.Context(), user.ID, hashes); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"backup_codes": backupCodes})

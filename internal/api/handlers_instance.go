@@ -30,7 +30,7 @@ import (
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 	list, err := s.instances.List(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
@@ -61,7 +61,7 @@ type createInstanceRequest struct {
 // this endpoint.
 func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	var req createInstanceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -69,6 +69,12 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "only server instances can be created directly; the Velocity proxy is managed automatically", http.StatusBadRequest)
 		return
 	}
+	name, err := validateInstanceName(req.Name)
+	if err != nil {
+		s.httpError(w, err, http.StatusBadRequest)
+		return
+	}
+	req.Name = name
 	if !req.AcceptEula {
 		http.Error(w, "accept_eula must be true to create a Minecraft server instance (see https://www.minecraft.net/eula)", http.StatusBadRequest)
 		return
@@ -99,7 +105,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	// connect/auth-fail/reconnect loop -- confirmed on real hardware).
 	gamePort, err := s.nextFreeGamePort(r.Context(), 25566)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -118,7 +124,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	rconPort := gamePort + 10000
 	rconPassword, err := generateRCONPassword()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -158,7 +164,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	// independent exposure regardless of loader/version.
 	hasMainDomain, err := s.domains.HasMainDomain(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	behindProxy := hasMainDomain && supportsVelocityForwardingForVersion(r.Context(), req.Loader, req.MCVersion) && !req.ExposeIndependently
@@ -180,12 +186,45 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// provisionServerFiles is multi-step (work dir, per-instance system user,
+	// EULA/properties, loader jar download) and any of those steps can fail
+	// partway -- a full disk, a loader download that 404s, an upstream
+	// outage. Without cleanup, whatever it already created stays behind: a
+	// directory and a system user with no DB row pointing at them, which the
+	// UI can't see and therefore can't delete either (confirmed as the
+	// "zombie instance" pattern that had to be cleaned up by hand on the Pi
+	// before). Same for a failed instances.Create -- the files exist but
+	// nothing references them.
+	cleanupPartialCreate := func() {
+		if inst.WorkDir != "" {
+			if err := os.RemoveAll(inst.WorkDir); err != nil {
+				log.Printf("create %s: clean up work dir after failed create: %v", inst.ID, err)
+			}
+		}
+		if err := process.RemoveInstanceUser(r.Context(), inst.ID); err != nil {
+			log.Printf("create %s: clean up per-instance user after failed create: %v", inst.ID, err)
+		}
+	}
+
 	if err := provisionServerFiles(r.Context(), inst, behindProxy, forwardingSecret); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		cleanupPartialCreate()
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.instances.Create(r.Context(), inst); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		cleanupPartialCreate()
+		// The unique indexes on game_port/rcon_port
+		// (0017_instance_port_unique.sql) are what turn nextFreeGamePort's
+		// check-then-use race into a clean failure instead of two instances
+		// silently sharing a port. That only happens when two creates land
+		// at nearly the same moment, so say so plainly rather than passing a
+		// raw "UNIQUE constraint failed" string through to the operator.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: instances.game_port") ||
+			strings.Contains(err.Error(), "UNIQUE constraint failed: instances.rcon_port") {
+			http.Error(w, "another instance just claimed that port -- try creating it again", http.StatusConflict)
+			return
+		}
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -484,23 +523,23 @@ func (s *Server) handleUploadServerJar(w http.ResponseWriter, r *http.Request) {
 	}
 	validated, err := requireJarMagicBytes(file)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
 
 	destPath := filepath.Join(inst.WorkDir, "server.jar")
 	out, err := os.Create(destPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if _, err := io.Copy(out, validated); err != nil {
 		out.Close()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := out.Close(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	chownInstanceFile(ctx, inst.ID, destPath)
@@ -556,7 +595,7 @@ func (s *Server) handleReinstallLoader(w http.ResponseWriter, r *http.Request) {
 	// Body is optional (a bare POST with no body means "reinstall latest",
 	// the original behavior) -- only reject a body that's present but broken.
 	if r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		if err := decodeJSONBody(r, &req); err != nil && err != io.EOF {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
@@ -573,7 +612,7 @@ func (s *Server) handleReinstallLoader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.instances.UpdateLoaderVersion(ctx, inst.ID, req.LoaderVersion); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	chownInstanceFile(ctx, inst.ID, filepath.Join(inst.WorkDir, "server.jar"))
@@ -631,7 +670,7 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req updateInstanceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -659,14 +698,14 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, registered, err := s.serverSubdomain(ctx, id); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		} else if registered {
 			http.Error(w, "instance is registered behind the proxy; switch it to independent exposure before changing its port", http.StatusBadRequest)
 			return
 		}
 		if inUse, err := s.gamePortInUse(ctx, req.GamePort, id); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.httpError(w, err, http.StatusInternalServerError)
 			return
 		} else if inUse {
 			http.Error(w, "that port is already used by another instance", http.StatusConflict)
@@ -694,17 +733,17 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.instances.UpdateSettings(ctx, id, gamePort, rconPort, req.CPUQuotaPercent, req.MemoryMaxMB); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.instances.UpdateLogSettings(ctx, id, req.LogStorageEnabled, req.LogRetentionMode, req.LogRetentionDays, req.LogRetentionMaxMB); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
 	updated, err := s.instances.Get(ctx, id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	// Applies a stricter retention setting immediately rather than waiting
@@ -788,23 +827,23 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 	// installed or a backup taken would otherwise fail to delete with a
 	// foreign key constraint error -- confirmed on real hardware.
 	if err := s.plugins.DeleteByInstance(ctx, id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := s.backups.DeleteByInstance(ctx, id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	// Same FK issue for port_mappings.instance_id -- an independently-
 	// exposed server that was running (and so had a game-port mapping via
 	// ReconcileGamePorts) would otherwise fail to delete the same way.
 	if err := s.removeGamePortMapping(ctx, id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
 	if err := s.instances.Delete(ctx, id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -822,10 +861,10 @@ func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.startInstanceCore(ctx, inst); err != nil {
 		if errors.Is(err, errNoServerJar) {
-			http.Error(w, err.Error(), http.StatusConflict)
+			s.httpError(w, err, http.StatusConflict)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -949,7 +988,7 @@ func (s *Server) handleStopInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.stopInstanceCore(ctx, inst); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -1068,7 +1107,7 @@ func (s *Server) handleRestartInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.stopInstanceCore(ctx, inst); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	// Same reasoning as stopInstanceCore above: by the time a slow stop
@@ -1077,10 +1116,10 @@ func (s *Server) handleRestartInstance(w http.ResponseWriter, r *http.Request) {
 	// start from actually happening.
 	if err := s.startInstanceCore(context.Background(), inst); err != nil {
 		if errors.Is(err, errNoServerJar) {
-			http.Error(w, err.Error(), http.StatusConflict)
+			s.httpError(w, err, http.StatusConflict)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -1096,7 +1135,7 @@ type sendCommandRequest struct {
 func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req sendCommandRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(r, &req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -1108,7 +1147,7 @@ func (s *Server) handleSendCommand(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.rconMgr.Execute(id, req.Command)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		s.httpError(w, err, http.StatusServiceUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"result": result})
@@ -1162,6 +1201,69 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// httpError is http.Error with the daemon's own data directory redacted out
+// of the message first. Wrapped filesystem errors carry the full path they
+// failed on (e.g. "open /var/lib/craftdeck/instances/<uuid>/server.jar: no
+// such file"), and those go straight to the operator's browser from ~160
+// call sites. Nothing there is a secret -- an authenticated operator could
+// list the same paths through the file manager -- but the server's internal
+// layout isn't information a client response needs to carry, and the paths
+// make the messages harder to read than the useful part that follows them.
+// Only the dataDir prefix is replaced, so the instance-relative part of the
+// path (which is the part that actually tells the operator which file broke)
+// survives.
+func (s *Server) httpError(w http.ResponseWriter, err error, status int) {
+	msg := err.Error()
+	if s.dataDir != "" {
+		msg = strings.ReplaceAll(msg, s.dataDir, "<data>")
+	}
+	http.Error(w, msg, status)
+}
+
+// validateInstanceName trims and sanity-checks the display name an operator
+// types when creating a server. Nothing validated it before, so an empty or
+// absurdly long name went straight into the DB -- and from there into
+// velocity.toml's server keys (quoted with %q, so not an injection, but
+// unreadable) and the world-export filename. Control characters are
+// rejected outright: a newline in particular ends up in the export's
+// Content-Disposition header, where net/http would reject the whole
+// response rather than sending a broken one.
+func validateInstanceName(name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	// Counted in runes, not bytes, so a Korean name isn't penalized for
+	// being 3 bytes per character.
+	if len([]rune(trimmed)) > 64 {
+		return "", fmt.Errorf("name must be 64 characters or fewer")
+	}
+	for _, r := range trimmed {
+		if r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("name must not contain control characters")
+		}
+	}
+	return trimmed, nil
+}
+
+// maxJSONRequestBytes caps how much of a request body the JSON decoders
+// below will read. Every request body in this API is a handful of short
+// fields (names, ports, flags, a subdomain label); 1MiB is orders of
+// magnitude more than any of them needs. The file-content editor is the one
+// genuine exception and has its own, larger cap (maxEditableFileBytes in
+// handlers_files.go).
+const maxJSONRequestBytes = 1 << 20 // 1MiB
+
+// decodeJSONBody decodes r's JSON body into dst with a hard size cap.
+// Decoding straight from r.Body would let a single request stream gigabytes
+// into the decoder's buffers -- on a Pi whose RAM is already mostly
+// committed to running Minecraft servers, that doesn't just fail the
+// request, it invites the OOM killer to pick one of those servers
+// (potentially mid-world-save) as its victim.
+func decodeJSONBody(r *http.Request, dst any) error {
+	return json.NewDecoder(io.LimitReader(r.Body, maxJSONRequestBytes)).Decode(dst)
 }
 
 // jarMagicBytes is the ZIP local-file-header signature every real .jar (a
