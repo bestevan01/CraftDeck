@@ -746,6 +746,16 @@ func (s *Server) handleUpdateInstance(w http.ResponseWriter, r *http.Request) {
 		s.httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	// An independently-exposed server publishes an SRV record advertising
+	// its own game_port (see desiredMainDomainRecords), so a port change
+	// has to be pushed to Cloudflare too -- otherwise the subdomain keeps
+	// sending players at the port the server just stopped listening on.
+	// Best-effort: the port change itself already succeeded.
+	if updated.Subdomain != "" {
+		if err := s.SyncMainDomainDNS(ctx); err != nil {
+			log.Printf("update instance settings: sync main-domain DNS after port change: %v", err)
+		}
+	}
 	// Applies a stricter retention setting immediately rather than waiting
 	// for the next daily sweep (main.go) or instance restart to catch up.
 	gamelog.EnforceRetention(filepath.Join(updated.WorkDir, "logs"), gamelog.Settings{
@@ -812,6 +822,13 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 	if inst.Kind == instance.KindServer {
 		if err := s.removeServerFromProxy(ctx, id); err != nil {
 			log.Printf("remove %s from proxy backends: %v (continuing with delete)", id, err)
+		}
+		// removeServerFromProxy only cleans up a forced host's records. An
+		// independently-exposed server's subdomain lives on the instance
+		// row instead, and its records would otherwise outlive the
+		// instance -- still resolving, now to a port nothing listens on.
+		if inst.Subdomain != "" {
+			s.deleteMainDomainDNSRecords(ctx, inst.Subdomain)
 		}
 	}
 

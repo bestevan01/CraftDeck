@@ -47,6 +47,14 @@ type Instance struct {
 	// that choice on every daemon restart.
 	ProxyOptOut bool `json:"proxy_opt_out"`
 
+	// Subdomain is the fully-qualified name an independently-exposed server
+	// is reachable under (empty when unassigned, or when the server sits
+	// behind the proxy -- that case uses proxy_backends.forced_host
+	// instead, see migration 0018). CraftDeck keeps an A record and an SRV
+	// record pointing at GamePort in sync for it, which is what lets a
+	// player type just the name instead of "name:25567".
+	Subdomain string `json:"subdomain"`
+
 	// LogStorage* control internal/gamelog's retention policy over this
 	// instance's own Log4j2 log files (WorkDir/logs/*.log.gz) -- every
 	// loader writes these on its own regardless of this setting, but none

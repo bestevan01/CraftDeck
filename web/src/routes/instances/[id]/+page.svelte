@@ -1234,6 +1234,14 @@
 		if (subdomain.registered && subdomain.forced_host) {
 			return formatAddress(subdomain.forced_host, connectPort);
 		}
+		// 독립 노출 서버에 서브도메인이 지정된 경우: CraftDeck이 이 이름의 SRV
+		// 레코드를 이 서버 자신의 게임 포트로 만들어 두므로, 기본 포트가
+		// 아니더라도 플레이어는 포트를 붙이지 않고 이름만 입력하면 된다
+		// (handlers_proxy.go의 desiredMainDomainRecords 참고). 여기서만
+		// formatAddress를 거치지 않는 이유가 바로 이것이다.
+		if (subdomain.forced_host) {
+			return subdomain.forced_host;
+		}
 		return formatAddress(domainConfig.hostname, connectPort);
 	});
 
@@ -1270,14 +1278,18 @@
 
 	async function saveSubdomain() {
 		const label = subdomainInput.trim();
-		if (!dnsLabelRE.test(label)) {
+		// 빈 값은 "해제"를 뜻하며, 독립 노출 서버에서만 허용한다 -- 프록시에
+		// 등록된 서버는 자신의 포트가 외부에 열려 있지 않아 서브도메인이
+		// 유일한 접속 경로이므로, 해제하면 접속 수단 자체가 사라진다.
+		const clearing = label === '' && subdomain !== null && !subdomain.registered;
+		if (!clearing && !dnsLabelRE.test(label)) {
 			subdomainError = $t('instanceDetailPage.proxy.invalidSubdomain');
 			return;
 		}
 		savingSubdomain = true;
 		subdomainError = '';
 		try {
-			const fullHost = domainSuffix ? `${label}${domainSuffix}` : label;
+			const fullHost = clearing ? '' : domainSuffix ? `${label}${domainSuffix}` : label;
 			subdomain = await api.setServerSubdomain(id, fullHost);
 			subdomainInput = labelFromForcedHost(subdomain.forced_host);
 		} catch (err) {
@@ -1484,7 +1496,7 @@
 					})}
 					{#if inst.kind === 'proxy'}
 						{$t('instanceDetailPage.header.connectPort', { port: inst.game_port })}
-					{:else if subdomain && !subdomain.registered}
+					{:else if subdomain && !subdomain.registered && !subdomain.forced_host}
 						{$t('instanceDetailPage.header.connectPort', { port: inst.game_port })}
 					{/if}
 				</p>

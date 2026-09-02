@@ -174,7 +174,24 @@ func (s *Server) addServerToProxy(ctx context.Context, server *instance.Instance
 		BackendInstanceID: server.ID,
 		Priority:          len(existing),
 	})
-	return s.applyProxyBackends(ctx, proxy, backends)
+	if err := s.applyProxyBackends(ctx, proxy, backends); err != nil {
+		return err
+	}
+	// Moving behind the proxy invalidates any subdomain this server held
+	// while independent, and leaving it in place is actively dangerous: its
+	// SRV record still advertises the server's own game_port, so clients
+	// resolving that name would connect *straight past* the proxy -- to a
+	// backend that has just been switched to online-mode=false and trusts
+	// the proxy to have authenticated them. Clear the name and tear the
+	// records down; the operator assigns a forced host instead.
+	if server.Subdomain != "" {
+		if err := s.instances.SetSubdomain(ctx, server.ID, ""); err != nil {
+			return err
+		}
+		s.deleteMainDomainDNSRecords(ctx, server.Subdomain)
+		server.Subdomain = ""
+	}
+	return nil
 }
 
 // findProxy returns CraftDeck's singleton Velocity proxy, or nil if one
@@ -281,19 +298,67 @@ func (s *Server) deleteMainDomainDNSRecords(ctx context.Context, fqdn string) {
 // server's own console instead of a separate proxy instance page.
 func (s *Server) serverSubdomain(ctx context.Context, serverID string) (forcedHost string, registered bool, err error) {
 	proxy, err := s.findProxy(ctx)
-	if err != nil || proxy == nil {
-		return "", false, err
-	}
-	backends, err := s.instances.ListProxyBackends(ctx, proxy.ID)
 	if err != nil {
 		return "", false, err
 	}
-	for _, b := range backends {
-		if b.BackendInstanceID == serverID {
-			return b.ForcedHost, true, nil
+	if proxy != nil {
+		backends, err := s.instances.ListProxyBackends(ctx, proxy.ID)
+		if err != nil {
+			return "", false, err
+		}
+		for _, b := range backends {
+			if b.BackendInstanceID == serverID {
+				return b.ForcedHost, true, nil
+			}
 		}
 	}
-	return "", false, nil
+	// Not behind the proxy: the subdomain (if any) lives on the instance
+	// itself instead (migration 0018). registered stays false, which is what
+	// tells the caller the returned name resolves straight to this server's
+	// own game_port rather than to the proxy.
+	inst, err := s.instances.Get(ctx, serverID)
+	if err != nil {
+		return "", false, err
+	}
+	return inst.Subdomain, false, nil
+}
+
+// setIndependentSubdomain assigns (or, with an empty name, clears) the
+// subdomain of a server that is not behind the proxy -- the counterpart to
+// setServerSubdomain, which only works for servers that are.
+//
+// Unlike the proxy path there is no velocity.toml to rewrite: the name is
+// purely DNS, so the whole operation is "save it, then make Cloudflare
+// match". The previous name's records are torn down explicitly, since
+// SyncMainDomainDNS only ever upserts (see desiredMainDomainRecords) --
+// leaving them would keep the old name pointing at a port this server may
+// no longer be listening on.
+func (s *Server) setIndependentSubdomain(ctx context.Context, serverID, subdomain string) error {
+	inst, err := s.instances.Get(ctx, serverID)
+	if err != nil {
+		return err
+	}
+	previous := inst.Subdomain
+	if previous == subdomain {
+		return nil
+	}
+	if err := s.instances.SetSubdomain(ctx, serverID, subdomain); err != nil {
+		return err
+	}
+	if subdomain != "" {
+		// Same reasoning as setServerSubdomain: create the records now
+		// rather than waiting for the periodic reconcile, so the operator
+		// can actually use the name they just typed. Best-effort -- a
+		// Cloudflare hiccup shouldn't undo the assignment that already
+		// succeeded.
+		if err := s.SyncMainDomainDNS(ctx); err != nil {
+			log.Printf("set independent subdomain: sync main-domain DNS records: %v", err)
+		}
+	}
+	if previous != "" {
+		s.deleteMainDomainDNSRecords(ctx, previous)
+	}
+	return nil
 }
 
 // setServerSubdomain updates the forced-host subdomain for a server already
@@ -375,22 +440,11 @@ func (s *Server) SyncMainDomainDNS(ctx context.Context) error {
 		return nil
 	}
 
-	proxy, err := s.findProxy(ctx)
-	if err != nil || proxy == nil {
-		return err
-	}
-	backends, err := s.instances.ListProxyBackends(ctx, proxy.ID)
+	desired, err := s.desiredMainDomainRecords(ctx)
 	if err != nil {
 		return err
 	}
-	hasForcedHost := false
-	for _, b := range backends {
-		if b.ForcedHost != "" {
-			hasForcedHost = true
-			break
-		}
-	}
-	if !hasForcedHost {
+	if len(desired) == 0 {
 		return nil
 	}
 
@@ -410,29 +464,104 @@ func (s *Server) SyncMainDomainDNS(ctx context.Context) error {
 		publicIPv6, ipv6Available = ip, true
 	}
 
-	seen := map[string]bool{} // several backends can share one forced host (see writeVelocityConfig)
-	for _, b := range backends {
-		if b.ForcedHost == "" || seen[b.ForcedHost] {
-			continue
-		}
-		seen[b.ForcedHost] = true
-		if err := dns.UpsertARecord(ctx, token, config.ZoneID, b.ForcedHost, publicIP); err != nil {
-			log.Printf("sync main-domain DNS: upsert A record for %s: %v (continuing with the rest)", b.ForcedHost, err)
+	for _, rec := range desired {
+		// Always a grey-cloud (proxied=false) A record -- see UpsertARecord.
+		// Minecraft is raw TCP, so a name routed through Cloudflare's HTTP
+		// proxy resolves fine but can never accept a game connection. This
+		// is also what makes an explicit record necessary at all rather
+		// than relying on a wildcard: an exact-name match beats "*", so
+		// these names bypass a proxied wildcard that would otherwise
+		// swallow them.
+		if err := dns.UpsertARecord(ctx, token, config.ZoneID, rec.FQDN, publicIP); err != nil {
+			log.Printf("sync main-domain DNS: upsert A record for %s: %v (continuing with the rest)", rec.FQDN, err)
 		}
 		if ipv6Available {
-			if err := dns.UpsertAAAARecord(ctx, token, config.ZoneID, b.ForcedHost, publicIPv6); err != nil {
-				log.Printf("sync main-domain DNS: upsert AAAA record for %s: %v (continuing with the rest)", b.ForcedHost, err)
+			if err := dns.UpsertAAAARecord(ctx, token, config.ZoneID, rec.FQDN, publicIPv6); err != nil {
+				log.Printf("sync main-domain DNS: upsert AAAA record for %s: %v (continuing with the rest)", rec.FQDN, err)
 			}
 		}
-		// FR-29: every forced-host subdomain routes through this same
-		// singleton proxy, so the SRV target port is always the proxy's own
-		// game_port, not something per-server (see UpsertSRVRecord's doc
-		// comment).
-		if err := dns.UpsertSRVRecord(ctx, token, config.ZoneID, b.ForcedHost, proxy.GamePort); err != nil {
-			log.Printf("sync main-domain DNS: upsert SRV record for %s: %v (continuing with the rest)", b.ForcedHost, err)
+		if err := dns.UpsertSRVRecord(ctx, token, config.ZoneID, rec.FQDN, rec.SRVPort); err != nil {
+			log.Printf("sync main-domain DNS: upsert SRV record for %s: %v (continuing with the rest)", rec.FQDN, err)
 		}
 	}
 	return nil
+}
+
+// mainDomainRecord is one subdomain CraftDeck owns in Cloudflare, and the
+// port its SRV record should advertise.
+type mainDomainRecord struct {
+	FQDN    string
+	SRVPort int
+}
+
+// desiredMainDomainRecords computes the full set of subdomains that *should*
+// exist right now, from both places a subdomain can be assigned:
+//
+//   - proxy_backends.forced_host, for servers behind the Velocity proxy.
+//     Their SRV port is the proxy's own game_port, not the backend's --
+//     every forced host reaches the same proxy, which then routes on the
+//     hostname in the client's handshake. (The backend itself is bound to
+//     127.0.0.1 and is not reachable from the internet at all.)
+//
+//   - instances.subdomain, for independently-exposed servers (migration
+//     0018). Their SRV port is the instance's own game_port, since there is
+//     no proxy in the path -- this is the whole reason the SRV record
+//     exists, letting a player omit a non-default port like 25567.
+//
+// Computing the whole desired set in one place, rather than upserting
+// records at each individual call site, is what keeps the two modes
+// consistent when a server moves between them: the SRV port simply
+// recomputes to whatever the server's current mode implies. The delete side
+// still has to be driven explicitly (see deleteMainDomainDNSRecords),
+// because Cloudflare holds records CraftDeck did not create -- the
+// operator's own web hosts and wildcard among them -- and a "delete
+// everything not in this set" pass would take those out too.
+func (s *Server) desiredMainDomainRecords(ctx context.Context) ([]mainDomainRecord, error) {
+	var out []mainDomainRecord
+	seen := map[string]bool{}
+
+	proxy, err := s.findProxy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	behindProxy := map[string]bool{}
+	if proxy != nil {
+		backends, err := s.instances.ListProxyBackends(ctx, proxy.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, b := range backends {
+			behindProxy[b.BackendInstanceID] = true
+			// Several backends can share one forced host (see
+			// writeVelocityConfig), which would otherwise upsert the same
+			// record repeatedly.
+			if b.ForcedHost == "" || seen[b.ForcedHost] {
+				continue
+			}
+			seen[b.ForcedHost] = true
+			out = append(out, mainDomainRecord{FQDN: b.ForcedHost, SRVPort: proxy.GamePort})
+		}
+	}
+
+	instances, err := s.instances.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, inst := range instances {
+		// behindProxy wins: a server that is somehow both registered behind
+		// the proxy and carrying a stale independent subdomain must not
+		// publish an SRV pointing at its own port, which would let clients
+		// connect straight past the proxy.
+		if inst.Kind != instance.KindServer || inst.Subdomain == "" || behindProxy[inst.ID] {
+			continue
+		}
+		if seen[inst.Subdomain] {
+			continue
+		}
+		seen[inst.Subdomain] = true
+		out = append(out, mainDomainRecord{FQDN: inst.Subdomain, SRVPort: inst.GamePort})
+	}
+	return out, nil
 }
 
 // forwardingSecret ensures the singleton proxy exists (creating it if this
@@ -888,15 +1017,36 @@ func (s *Server) handleSetServerSubdomain(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.ForcedHost) == "" {
+	_, registered, err := s.serverSubdomain(ctx, id)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	host := strings.TrimSpace(req.ForcedHost)
+	// An empty name means "unassign", which only makes sense for an
+	// independently-exposed server -- a server behind the proxy is reachable
+	// *only* by forced host (it has no internet-facing port of its own), so
+	// clearing it there would strand it rather than fall back to anything.
+	if host == "" && registered {
 		http.Error(w, "forced_host must not be empty", http.StatusBadRequest)
 		return
 	}
-	if err := s.validateForcedHost(ctx, req.ForcedHost); err != nil {
-		s.httpError(w, err, http.StatusBadRequest)
-		return
+	if host != "" {
+		if err := s.validateForcedHost(ctx, host); err != nil {
+			s.httpError(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := s.ensureSubdomainAvailable(ctx, id, host); err != nil {
+			s.httpError(w, err, http.StatusConflict)
+			return
+		}
 	}
-	if err := s.setServerSubdomain(ctx, id, req.ForcedHost); err != nil {
+	if registered {
+		err = s.setServerSubdomain(ctx, id, host)
+	} else {
+		err = s.setIndependentSubdomain(ctx, id, host)
+	}
+	if err != nil {
 		s.httpError(w, err, http.StatusBadRequest)
 		return
 	}
@@ -912,6 +1062,39 @@ func (s *Server) handleSetServerSubdomain(w http.ResponseWriter, r *http.Request
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ensureSubdomainAvailable rejects a name already claimed by a *different*
+// instance, from either place a subdomain can live (proxy_backends
+// .forced_host or instances.subdomain). The unique index from migration
+// 0018 only covers the latter, and nothing at all covers a collision
+// across the two -- which is the case that actually matters: an
+// independent server and a proxy backend sharing one name would fight over
+// the same SRV record, and whichever synced last would silently win.
+func (s *Server) ensureSubdomainAvailable(ctx context.Context, serverID, host string) error {
+	instances, err := s.instances.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, inst := range instances {
+		if inst.ID != serverID && inst.Subdomain == host {
+			return fmt.Errorf("subdomain is already used by %q", inst.Name)
+		}
+	}
+	proxy, err := s.findProxy(ctx)
+	if err != nil || proxy == nil {
+		return err
+	}
+	backends, err := s.instances.ListProxyBackends(ctx, proxy.ID)
+	if err != nil {
+		return err
+	}
+	for _, b := range backends {
+		if b.BackendInstanceID != serverID && b.ForcedHost == host {
+			return fmt.Errorf("subdomain is already used by another server behind the proxy")
+		}
+	}
+	return nil
 }
 
 type proxyStatusResponse struct {

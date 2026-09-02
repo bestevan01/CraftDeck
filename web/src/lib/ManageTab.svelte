@@ -322,6 +322,84 @@
 		</div>
 	{/if}
 
+	<!-- Connection subdomain for an independently-exposed server. A separate
+		card from the proxy one below on purpose: this name has nothing to do
+		with Velocity -- there is no proxy in the path at all. CraftDeck just
+		keeps an A record and an SRV record pointing at this instance's own
+		game port, which is what lets a player omit a non-default port like
+		25567 (see desiredMainDomainRecords in handlers_proxy.go).
+
+		Only meaningful with an owned main domain registered: a free DDNS
+		subdomain is a single name whose zone CraftDeck doesn't control, so
+		there's nothing to create records under. -->
+	{#if domainConfig?.kind === 'main_domain' && inst.kind === 'server' && subdomain && !subdomain.registered}
+		<div class="border-border bg-card rounded-lg border p-4">
+			<h2 class="font-medium">{$t('manageTab.independentSubdomain.title')}</h2>
+			<p class="text-muted-foreground mt-1 text-xs">
+				{$t('manageTab.independentSubdomain.explainNote')}
+			</p>
+			{#if subdomain.forced_host}
+				<p class="text-muted-foreground mt-1 text-xs">
+					{$t('manageTab.independentSubdomain.srvNote', { port: inst.game_port })}
+				</p>
+			{:else}
+				<p class="text-muted-foreground mt-1 text-xs">
+					{$t('manageTab.independentSubdomain.noneAssigned')}
+				</p>
+			{/if}
+			<div class="mt-2 flex gap-2">
+				{#if domainSuffix}
+					<div class="border-input bg-background flex min-w-0 flex-1 items-center rounded-md border px-2 py-1.5">
+						<input
+							type="text"
+							bind:value={subdomainInput}
+							onkeydown={onSubdomainKeydown}
+							placeholder="create"
+							class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+						/>
+						<span class="text-muted-foreground shrink-0 text-sm">{domainSuffix}</span>
+					</div>
+				{:else}
+					<input
+						type="text"
+						bind:value={subdomainInput}
+						onkeydown={onSubdomainKeydown}
+						placeholder={$t('manageTab.proxy.subdomainPlaceholderExample')}
+						class="border-input bg-background min-w-0 flex-1 rounded-md border px-2 py-1.5 text-sm"
+					/>
+				{/if}
+				<button
+					class="bg-primary text-primary-foreground shrink-0 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+					disabled={savingSubdomain || subdomainInput.trim() === labelFromForcedHost(subdomain.forced_host)}
+					onclick={onSaveSubdomain}
+				>
+					{savingSubdomain ? $t('manageTab.proxy.savingSubdomain') : $t('manageTab.proxy.saveButton')}
+				</button>
+			</div>
+			<p class="text-muted-foreground mt-2 text-xs">
+				{$t('manageTab.independentSubdomain.propagationNote')}
+			</p>
+			{#if subdomain.forced_host}
+				<p class="mt-2 text-xs text-yellow-500">
+					{$t('manageTab.independentSubdomain.clearWarning')}
+				</p>
+				<button
+					class="border-border text-destructive mt-2 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50"
+					disabled={savingSubdomain}
+					onclick={() => {
+						subdomainInput = '';
+						onSaveSubdomain();
+					}}
+				>
+					{$t('manageTab.independentSubdomain.clearButton')}
+				</button>
+			{/if}
+			{#if subdomainError}
+				<p class="text-destructive mt-2 text-xs">{subdomainError}</p>
+			{/if}
+		</div>
+	{/if}
+
 	<!-- Proxy registration -- the operator's one actual proxy-related setting,
 		now that the always-on Velocity proxy itself has no UI of its own (see
 		ensureProxyInstance/proxyMemoryMaxMB). Shown for every server, not just
@@ -345,7 +423,7 @@
 				{$t('manageTab.proxy.modIncompatWarning')}
 			</p>
 		{/if}
-		{#if subdomainError}
+		{#if subdomainError && subdomain?.registered}
 			<p class="text-destructive mt-2 text-xs">{subdomainError}</p>
 		{:else if subdomain && !subdomain.registered}
 			<p class="text-muted-foreground mt-2 text-xs">

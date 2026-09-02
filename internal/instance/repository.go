@@ -39,7 +39,8 @@ func (r *Repository) Get(ctx context.Context, id string) (*Instance, error) {
 		SELECT id, name, kind, loader, loader_version, mc_version, java_major,
 			game_port, rcon_port, rcon_password, cpu_quota_percent,
 			memory_max_mb, work_dir, status, created_at, proxy_opt_out,
-			log_storage_enabled, log_retention_mode, log_retention_days, log_retention_max_mb
+			log_storage_enabled, log_retention_mode, log_retention_days, log_retention_max_mb,
+			subdomain
 		FROM instances WHERE id = ?`, id)
 	return scanInstance(row)
 }
@@ -49,7 +50,8 @@ func (r *Repository) List(ctx context.Context) ([]*Instance, error) {
 		SELECT id, name, kind, loader, loader_version, mc_version, java_major,
 			game_port, rcon_port, rcon_password, cpu_quota_percent,
 			memory_max_mb, work_dir, status, created_at, proxy_opt_out,
-			log_storage_enabled, log_retention_mode, log_retention_days, log_retention_max_mb
+			log_storage_enabled, log_retention_mode, log_retention_days, log_retention_max_mb,
+			subdomain
 		FROM instances ORDER BY created_at`)
 	if err != nil {
 		return nil, fmt.Errorf("list instances: %w", err)
@@ -111,6 +113,15 @@ func (r *Repository) SetProxyOptOut(ctx context.Context, id string, optOut bool)
 	return err
 }
 
+// SetSubdomain records the DNS name an independently-exposed server is
+// reachable under (see Instance.Subdomain). Empty clears it. Callers run
+// SyncMainDomainDNS right after so the Cloudflare records catch up
+// immediately instead of waiting for the next periodic reconcile.
+func (r *Repository) SetSubdomain(ctx context.Context, id, subdomain string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE instances SET subdomain = ? WHERE id = ?`, subdomain, id)
+	return err
+}
+
 // UpdateLogSettings changes the operator-facing gamelog retention controls
 // (see Instance.LogStorage* doc comment). Callers run
 // gamelog.EnforceRetention right after this so a stricter setting is
@@ -142,6 +153,7 @@ func scanInstance(row rowScanner) (*Instance, error) {
 		&inst.RCONPassword, &inst.CPUQuotaPercent, &inst.MemoryMaxMB,
 		&inst.WorkDir, &inst.Status, &createdAt, &inst.ProxyOptOut,
 		&inst.LogStorageEnabled, &inst.LogRetentionMode, &inst.LogRetentionDays, &inst.LogRetentionMaxMB,
+		&inst.Subdomain,
 	)
 	if err != nil {
 		return nil, err
