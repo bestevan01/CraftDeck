@@ -165,6 +165,19 @@ func (s *Server) handleSetDomainSettings(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "domain registered, but failed to reconcile port forwarding: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// The free-subdomain branch above syncs DNS through
+		// ddnsManager.Reconcile; the main-domain branch had no equivalent,
+		// so every subdomain's records sat untouched until the background
+		// loop's next pass up to ddns.ReconcileInterval later (20 minutes).
+		// That is what an operator sees after re-entering a Cloudflare token
+		// to fix a bad one: the token saves, nothing happens, and there is
+		// no error to explain the wait. Runs after ReconcileProxyMode so the
+		// proxy exists and its game_port is the one forced hosts point at
+		// (see desiredMainDomainRecords).
+		if err := s.SyncMainDomainDNS(ctx); err != nil {
+			http.Error(w, "domain registered, but the first DNS sync failed: "+err.Error(), http.StatusBadGateway)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, config)
 }
