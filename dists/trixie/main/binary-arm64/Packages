@@ -1,0 +1,16 @@
+Package: craftdeck
+Version: 0.1.0
+Architecture: arm64
+Maintainer: CraftDeck maintainers
+Installed-Size: 20129
+Depends: ca-certificates, temurin-8-jre, temurin-17-jre, temurin-21-jre, temurin-25-jre
+Homepage: https://github.com/example/craftdeck
+Priority: optional
+Section: 
+Filename: pool/main/c/craftdeck/craftdeck_0.1.0_arm64.deb
+Size: 11047644
+SHA256: 3107a84f739dac4657ab8f17a9756f77aa8e648b86381506b9984d1b12b49bea
+SHA1: 60d7e6fc7b041d36a1b8ea8b5766ea31c6029aac
+MD5sum: ee71327f40643395ea67a30e71085033
+Description: Web-managed Minecraft Java Edition server manager for Raspberry Pi.
+

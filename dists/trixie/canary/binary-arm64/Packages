@@ -1,0 +1,16 @@
+Package: craftdeck
+Version: 0.1.0.canary-28
+Architecture: arm64
+Maintainer: CraftDeck maintainers
+Installed-Size: 20286
+Depends: ca-certificates, temurin-8-jre, temurin-17-jre, temurin-21-jre, temurin-25-jre
+Homepage: https://github.com/example/craftdeck
+Priority: optional
+Section: 
+Filename: pool/canary/c/craftdeck/craftdeck_0.1.0.canary-28_arm64.deb
+Size: 11137064
+SHA256: 3235df71f5865092ba66930ca04be1466ac95e9d28bc962e2bfcd400a980a6b8
+SHA1: b7742ff8b6dd8215060232f13fcafc55a67041b1
+MD5sum: 3dcc5db7337aa1042113bed1a7d09ca3
+Description: Web-managed Minecraft Java Edition server manager for Raspberry Pi.
+

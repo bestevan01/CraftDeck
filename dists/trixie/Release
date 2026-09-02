@@ -1,0 +1,38 @@
+Origin: CraftDeck
+Label: CraftDeck
+Suite: beta
+Codename: trixie
+Date: Wed, 02 Sep 2026 07:41:45 UTC
+Architectures: arm64
+Components: main beta canary
+Description: CraftDeck apt repository
+MD5Sum:
+ bc3c3969de6393887dd0c77280a30524 590 main/binary-arm64/Packages
+ 16d243e7956d12f5bd92abc613a89b42 407 main/binary-arm64/Packages.gz
+ 12c95df9264cfbf0149b625c5c37792a 123 main/binary-arm64/Release
+ 62b2a3f143c0f5380f77258557c1e93c 590 beta/binary-arm64/Packages
+ 574c4910d9c8506d769cb6e684b7340e 408 beta/binary-arm64/Packages.gz
+ e1487885f84f89a7c90f2bc01d568a05 123 beta/binary-arm64/Release
+ 8e2e55e1fae3f4d6fc087aae90ee01f1 612 canary/binary-arm64/Packages
+ 5bbfddaec20703b1054b235f3da17e9f 416 canary/binary-arm64/Packages.gz
+ c4eab78a8c94ea5f76d4dd25e2bf0f39 125 canary/binary-arm64/Release
+SHA1:
+ 222bd5f5cbee8c8383c28b9beacb4e080b1b229a 590 main/binary-arm64/Packages
+ 1cf35ce3b160dd7a55ad9f07bf6febd3b11c5cba 407 main/binary-arm64/Packages.gz
+ 21f8ef6709370e03e111b5ec8a790023c7f511d6 123 main/binary-arm64/Release
+ d8592edbac4d74116e12b818e65672790cd11a3c 590 beta/binary-arm64/Packages
+ 0104b7eb4b9c125197cb42c2edaf97be87ccf2a3 408 beta/binary-arm64/Packages.gz
+ 5c47fdea5bffe8aeb691e6adf7696f3ea7224385 123 beta/binary-arm64/Release
+ 2fca14317714b38548016538ad66df8d58f1b50f 612 canary/binary-arm64/Packages
+ b396236d25a651861018364055d09b379e88c3bb 416 canary/binary-arm64/Packages.gz
+ 197613b43dd6a09536ddec848027a7a7b4a37de9 125 canary/binary-arm64/Release
+SHA256:
+ 059d4bd4b09dcbd1921601694e26662ac4aa8f9458acab08852214e1cda865ad 590 main/binary-arm64/Packages
+ 4f84724b6239ec887f8920f778797b8b9a798485120450489a6564de86c8041b 407 main/binary-arm64/Packages.gz
+ 0854036534a4e61458a058368792e7d8bce561051b35fd3f374e2ca966b58080 123 main/binary-arm64/Release
+ 7645b790a9187f0d59ad218bba4db4154cb058cdddefeb4a880eda0d71a4a8e5 590 beta/binary-arm64/Packages
+ b450e531e8142673ec7bdc22b94df91c174712f805aea0319102699140584170 408 beta/binary-arm64/Packages.gz
+ 8d4fdc00d72edc16301d670c05ac85e1dc72338a5bd3d5d9fca397dbd9778657 123 beta/binary-arm64/Release
+ 8075053adb88ba0b8507a80b5309c244a8c6ef573d07091e478ae48898a6b1fd 612 canary/binary-arm64/Packages
+ acf5cc4d777e66ce1d164aab99a2134730b1463cca514efd694b0e4902a93fcf 416 canary/binary-arm64/Packages.gz
+ 333c5b1ed7726a1e45c6ff430824e7897654141e684ce5c65ca679554792d6b9 125 canary/binary-arm64/Release

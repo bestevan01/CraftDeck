@@ -1,0 +1,6 @@
+Archive: beta
+Component: main
+Origin: CraftDeck
+Label: CraftDeck
+Architecture: arm64
+Description: CraftDeck apt repository
